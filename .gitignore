@@ -1,0 +1,37 @@
+# Claude Code (local dev tooling — not published)
+.claude/
+CLAUDE.md
+.mcp.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+.eggs/
+
+# Credentials (NEVER commit)
+.env
+*.key
+*_apikey.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
