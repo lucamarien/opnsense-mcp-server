@@ -273,10 +273,13 @@ class ConfigCache:
         svc_rows: list[dict[str, Any]] = services.get("rows", [])
         running = sum(1 for s in svc_rows if s.get("running") in (1, "1", True))
 
+        # OPNsense 26.x nests product info under "product"; earlier versions
+        # have product_version at the top level.
+        fw_product = firmware.get("product", firmware)
         self._inventory = {
             "firmware": {
-                "version": firmware.get("product_version", "unknown"),
-                "product": firmware.get("product_name", "OPNsense"),
+                "version": fw_product.get("product_version", "unknown"),
+                "product": fw_product.get("product_name", "OPNsense"),
             },
             "plugins": plugins,
             "dhcp": dhcp,

@@ -177,6 +177,11 @@ class TestOpnPing:
         assert "error" in result
         assert "invalid" in result["error"].lower()
 
+    async def test_ping_rejects_shell_metacharacters(self, mock_api, mock_ctx):
+        for bad_char in ("(", ")", "{", "}", "<", ">", "'", '"', "\\", " "):
+            result = await opn_ping(mock_ctx, host=f"host{bad_char}bad")
+            assert "error" in result, f"Should reject hostname with '{bad_char}'"
+
     async def test_ping_rejects_empty_hostname(self, mock_api, mock_ctx):
         result = await opn_ping(mock_ctx, host="")
         assert "error" in result
@@ -266,6 +271,16 @@ class TestOpnDnsLookup:
     async def test_rejects_invalid_hostname(self, mock_api, mock_ctx):
         result = await opn_dns_lookup(mock_ctx, hostname="example.com`whoami`")
         assert "error" in result
+
+    async def test_rejects_invalid_server(self, mock_api, mock_ctx):
+        result = await opn_dns_lookup(mock_ctx, hostname="example.com", server="8.8.8.8; rm -rf /")
+        assert "error" in result
+        assert "DNS server" in result["error"]
+
+    async def test_accepts_valid_server(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"result": "ok", "response": []})
+        result = await opn_dns_lookup(mock_ctx, hostname="example.com", server="dns.google")
+        assert "error" not in result
 
 
 class TestOpnPfStates:

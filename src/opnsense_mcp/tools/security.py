@@ -268,8 +268,11 @@ async def _check_firmware(
     except OPNsenseAPIError as exc:
         return {"status": "skipped", "reason": str(exc), "findings": []}
 
-    version = result.get("product_version", "unknown")
-    name = result.get("product_name", "OPNsense")
+    # OPNsense 26.x nests product info under "product"; earlier versions
+    # have product_version at the top level.
+    product = result.get("product", result)
+    version = product.get("product_version", "unknown")
+    name = product.get("product_name", "OPNsense")
     findings: list[dict[str, Any]] = [
         _finding(
             severity="info",

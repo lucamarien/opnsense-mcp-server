@@ -93,6 +93,22 @@ def firmware_status_25_7() -> dict[str, Any]:
 
 
 @pytest.fixture
+def firmware_status_26_x() -> dict[str, Any]:
+    """Mock firmware/status response for OPNsense 26.x+ (nested product)."""
+    return {
+        "product": {
+            "product_version": "26.1.3",
+            "product_name": "OPNsense",
+            "product_id": "opnsense",
+            "product_abi": "26.1",
+            "product_nickname": "Witty Woodpecker",
+        },
+        "status_msg": "",
+        "status": "update",
+    }
+
+
+@pytest.fixture
 def mock_api(mock_config: OPNsenseConfig) -> OPNsenseAPI:
     """Create an OPNsenseAPI with a mocked httpx client and pre-detected version."""
     api = OPNsenseAPI(mock_config)

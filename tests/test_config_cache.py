@@ -243,6 +243,32 @@ class TestConfigCache:
         assert "config_sections" in summary
         assert summary["cache_status"] == "fresh"
 
+    async def test_summary_26_x_nested_firmware(self):
+        """OPNsense 26.x nests product info under firmware['product']."""
+        cache = ConfigCache()
+        api = self._make_mock_api()
+        # Override firmware.status to return 26.x nested format
+        original_get = api.get.side_effect
+
+        async def mock_get_26x(endpoint: str) -> dict:
+            if endpoint == "firmware.status":
+                return {
+                    "product": {
+                        "product_version": "26.1.3",
+                        "product_name": "OPNsense",
+                    },
+                    "status_msg": "",
+                    "status": "update",
+                }
+            return await original_get(endpoint)
+
+        api.get = AsyncMock(side_effect=mock_get_26x)
+        await cache.load(api)
+
+        summary = cache.summary()
+        assert summary["firmware"]["version"] == "26.1.3"
+        assert summary["firmware"]["product"] == "OPNsense"
+
     async def test_summary_section_info(self):
         cache = ConfigCache()
         api = self._make_mock_api()

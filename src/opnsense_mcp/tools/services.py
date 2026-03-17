@@ -187,9 +187,10 @@ async def opn_crowdsec_status(ctx: Context) -> dict[str, Any]:
     Returns: dict with 'service_status', 'decisions_count', and 'alerts_count'.
     """
     api = get_api(ctx)
+    _search = {"current": 1, "rowCount": 500, "searchPhrase": ""}
     status = await api.get("crowdsec.service.status")
-    decisions = await api.get("crowdsec.decisions.search")
-    alerts = await api.get("crowdsec.alerts.search")
+    decisions = await api.post("crowdsec.decisions.search", _search)
+    alerts = await api.post("crowdsec.alerts.search", _search)
 
     decision_rows: list[dict[str, Any]] = decisions.get("rows", [])
     alert_rows: list[dict[str, Any]] = alerts.get("rows", [])

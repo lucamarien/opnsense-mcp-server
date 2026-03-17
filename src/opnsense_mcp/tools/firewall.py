@@ -82,7 +82,7 @@ async def opn_firewall_log(
     raw = await api.get("firewall.log")
     rows: list[dict[str, Any]] = raw if isinstance(raw, list) else raw.get("rows", raw.get("entries", []))
 
-    filters_active = any([source_ip, destination_ip, action, interface])
+    filters_active = any((source_ip, destination_ip, action, interface))
     if filters_active:
         filtered: list[dict[str, Any]] = []
         for entry in rows:

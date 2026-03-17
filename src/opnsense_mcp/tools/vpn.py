@@ -33,9 +33,10 @@ async def opn_ipsec_status(ctx: Context) -> dict[str, Any]:
     Returns: dict with 'service_status', 'phase1' (IKE sessions), and 'phase2' (tunnels).
     """
     api = get_api(ctx)
+    _search = {"current": 1, "rowCount": 500, "searchPhrase": ""}
     status = await api.get("ipsec.service.status")
-    phase1 = await api.get("ipsec.sessions.phase1")
-    phase2 = await api.get("ipsec.sessions.phase2")
+    phase1 = await api.post("ipsec.sessions.phase1", _search)
+    phase2 = await api.post("ipsec.sessions.phase2", _search)
     return {
         "service_status": status.get("status", "unknown"),
         "phase1": phase1.get("rows", []),
@@ -53,9 +54,10 @@ async def opn_openvpn_status(ctx: Context) -> dict[str, Any]:
     Returns: dict with 'instances', 'sessions' (connected clients), and 'routes'.
     """
     api = get_api(ctx)
-    instances = await api.get("openvpn.instances")
-    sessions = await api.get("openvpn.sessions")
-    routes = await api.get("openvpn.routes")
+    _search = {"current": 1, "rowCount": 500, "searchPhrase": ""}
+    instances = await api.post("openvpn.instances", _search)
+    sessions = await api.post("openvpn.sessions", _search)
+    routes = await api.post("openvpn.routes", _search)
     return {
         "instances": instances.get("rows", []),
         "sessions": sessions.get("rows", []),

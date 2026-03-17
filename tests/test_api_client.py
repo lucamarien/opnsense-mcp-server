@@ -170,6 +170,13 @@ class TestVersionDetection:
         assert api._detected_version == (26, 1)
         assert api._use_snake_case is True
 
+    async def test_version_26_x_nested_product(self, mock_config, mock_httpx_client, firmware_status_26_x):
+        """OPNsense 26.x nests product info under body['product']."""
+        api = _make_api(mock_config, mock_httpx_client, firmware_status_26_x)
+        await api._ensure_version_detected()
+        assert api._detected_version == (26, 1)
+        assert api._use_snake_case is True
+
     async def test_invalid_version_string(self, mock_config, mock_httpx_client):
         firmware = {"product_version": "invalid", "product_name": "OPNsense"}
         api = _make_api(mock_config, mock_httpx_client, firmware)

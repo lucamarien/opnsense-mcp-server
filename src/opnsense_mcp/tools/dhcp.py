@@ -15,7 +15,7 @@ async def opn_list_dhcp_leases(ctx: Context) -> dict[str, Any]:
 
     Use this when the OPNsense instance uses the ISC DHCP plugin (os-isc-dhcp).
     ISC DHCP is legacy and being phased out — most 26.x instances use dnsmasq or Kea.
-    Use opn_inventory first to check which DHCP backend is active.
+    Use opn_scan_config first to check which DHCP backend is active.
     Returns: dict with DHCP lease entries including address, mac, and hostname fields.
     """
     api = get_api(ctx)
@@ -32,7 +32,7 @@ async def opn_list_kea_leases(
 
     Use this when the OPNsense instance uses Kea for DHCP (available since 24.7).
     Kea is the modern replacement for ISC DHCP, recommended for HA setups.
-    Use opn_inventory first to check which DHCP backend is active.
+    Use opn_scan_config first to check which DHCP backend is active.
     Returns: dict with 'rows' (list of leases) and 'rowCount' (total).
     """
     api = get_api(ctx)
@@ -53,7 +53,7 @@ async def opn_list_dnsmasq_leases(
     Use this when the OPNsense instance uses dnsmasq for DHCP (default in 26.x).
     dnsmasq is a lightweight combined DNS/DHCP server that handles both
     DHCPv4 and DHCPv6. IPv6 leases appear alongside IPv4 leases in the results.
-    Use opn_inventory first to check which DHCP backend is active.
+    Use opn_scan_config first to check which DHCP backend is active.
     Returns: dict with 'rows' (list of leases) and 'rowCount' (total).
     """
     api = get_api(ctx)

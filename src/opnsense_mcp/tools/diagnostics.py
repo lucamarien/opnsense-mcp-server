@@ -11,7 +11,7 @@ from opnsense_mcp.server import get_api, mcp
 
 _MAX_PING_POLLS = 30
 _PING_POLL_INTERVAL = 1.0
-_HOSTNAME_REJECT = frozenset({";", "&", "|", "$", "`", "\n", "\r"})
+_HOSTNAME_REJECT = frozenset({";", "&", "|", "$", "`", "\n", "\r", "(", ")", "{", "}", "<", ">", "'", '"', "\\", " "})
 
 
 def _validate_hostname(value: str) -> str | None:
@@ -129,6 +129,8 @@ async def opn_dns_lookup(
     """
     if err := _validate_hostname(hostname):
         return {"error": err}
+    if server and (err := _validate_hostname(server)):
+        return {"error": f"Invalid DNS server: {err}"}
     api = get_api(ctx)
     result = await api.post(
         "diagnostics.dns_diagnostics.set",

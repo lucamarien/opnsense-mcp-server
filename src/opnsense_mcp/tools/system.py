@@ -32,7 +32,8 @@ async def opn_system_status(ctx: Context) -> dict[str, Any]:
 
     Use this when you need to check the current firmware version, system name,
     or verify the OPNsense appliance is reachable and responding.
-    Returns: dict with 'product_version', 'product_name', and other system fields.
+    Returns: dict with firmware/product info. On OPNsense 26.x+, product fields
+    are nested under a 'product' key; earlier versions have them at the top level.
     """
     api = get_api(ctx)
     return await api.get("firmware.status")

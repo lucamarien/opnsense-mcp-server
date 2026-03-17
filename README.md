@@ -4,6 +4,11 @@ A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server
 
 **62 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
 
+## Requirements
+
+- **Python 3.11+**
+- **OPNsense 24.7 or newer** — the MCP server relies on the MVC-based API endpoints introduced in OPNsense 24.7. Older versions use a different API structure that is not compatible. The server auto-detects the OPNsense version on first connect and selects the correct endpoint naming (camelCase for pre-25.7, snake_case for 25.7+). OPNsense 26.x is fully supported, including its changed firmware status response format.
+
 ## Security Model
 
 This MCP server is designed with security as the primary concern:
@@ -123,7 +128,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 
 | Environment Variable | Default | Description |
 | --- | --- | --- |
-| `OPNSENSE_URL` | `https://192.168.1.1/api` | OPNsense API base URL (must end with `/api`) |
+| `OPNSENSE_URL` | *(required)* | OPNsense API base URL (must end with `/api`) |
 | `OPNSENSE_API_KEY` | *(required)* | API key from OPNsense user settings |
 | `OPNSENSE_API_SECRET` | *(required)* | API secret from OPNsense user settings |
 | `OPNSENSE_VERIFY_SSL` | `true` | Verify SSL certificate (`false` for self-signed certs) |

@@ -38,7 +38,7 @@ This runs: lint, format check, security scan, type check, tests, and dependency 
 
 ```python
 @mcp.tool()
-async def opn_example_tool(ctx: Context, search: str = "", limit: int = 50) -> dict:
+async def opn_example_tool(ctx: Context, search: str = "", limit: int = 50) -> dict[str, Any]:
     """One-line description of what this does.
 
     Use this when you need to [specific scenario].

@@ -401,6 +401,24 @@ class TestCheckFirmware:
         assert len(findings) == 1
         assert findings[0]["severity"] == "warning"
 
+    async def test_firmware_26_x_nested_product(self, mock_api: MagicMock, mock_ctx: MagicMock) -> None:
+        """OPNsense 26.x nests product info under body['product']."""
+        _mock_api_calls(
+            mock_api,
+            firmware={
+                "product": {
+                    "product_version": "26.1.3",
+                    "product_name": "OPNsense",
+                },
+                "status_msg": "",
+                "status": "update",
+            },
+        )
+        _setup_config_cache(mock_ctx)
+        result = await opn_security_audit(mock_ctx)
+        assert result["firmware"]["product_version"] == "26.1.3"
+        assert result["firmware"]["product_name"] == "OPNsense"
+
     async def test_firmware_api_failure(self, mock_api: MagicMock, mock_ctx: MagicMock) -> None:
         _mock_api_calls(mock_api, firmware=OPNsenseAPIError("Connection failed"))
         _setup_config_cache(mock_ctx)

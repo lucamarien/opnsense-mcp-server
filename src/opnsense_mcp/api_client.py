@@ -24,7 +24,6 @@ BLOCKED_ENDPOINTS: frozenset[str] = frozenset(
 )
 
 # --- Endpoint registry: logical_name -> (camelCase, snake_case) ---
-# Full set will be populated as tools are implemented in milestone 1.3.
 ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
     # Firmware (unchanged across versions)
     "firmware.status": ("core/firmware/status", "core/firmware/status"),
@@ -536,7 +535,10 @@ class OPNsenseAPI:
 
         try:
             body: dict[str, Any] = response.json()
-            version_str: str = body["product_version"]
+            # OPNsense 26.x nests product info under body["product"];
+            # earlier versions put product_version at the top level.
+            product = body.get("product", body)
+            version_str: str = product["product_version"]
             parts = version_str.split(".")[:2]
             self._detected_version = (int(parts[0]), int(parts[1]))
         except (ValueError, TypeError, KeyError, IndexError) as exc:

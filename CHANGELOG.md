@@ -4,11 +4,19 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [0.3.2] - 2026-03-03
+## [0.3.2] - 2026-03-17
 
 ### Fixed
 
 - **Diagnostics:** `opn_dns_lookup` now sends correct API payload (`dns.settings.hostname` instead of `dns.hostname`) — lookups were silently failing with validation error
+- **VPN:** `opn_ipsec_status` now uses POST for `searchPhase1`/`searchPhase2` endpoints — GET was returning empty or failed responses
+- **VPN:** `opn_openvpn_status` now uses POST with pagination for all three search endpoints (instances, sessions, routes)
+- **Services:** `opn_crowdsec_status` now uses POST for decisions/alerts search — consistent with `opn_crowdsec_alerts`
+
+### Security
+
+- **Diagnostics:** Expanded hostname validation to reject additional shell metacharacters (`(`, `)`, `{`, `}`, `<`, `>`, `'`, `"`, `\`, space)
+- **Diagnostics:** `opn_dns_lookup` now validates the `server` parameter against the same injection rules as `hostname`
 
 ### Changed
 

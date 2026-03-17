@@ -81,23 +81,28 @@ class TestOpnListCronJobs:
 class TestOpnCrowdsecStatus:
     """Tests for opn_crowdsec_status."""
 
+    _SEARCH_PARAMS = {"current": 1, "rowCount": 500, "searchPhrase": ""}
+
     async def test_returns_status_and_counts(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(
+        mock_api.get = AsyncMock(return_value={"status": "running"})
+        mock_api.post = AsyncMock(
             side_effect=[
-                {"status": "running"},
                 {"rows": [{"id": "1", "type": "ban"}], "rowCount": 1},
                 {"rows": [{"id": "a1"}], "rowCount": 1},
             ],
         )
         result = await opn_crowdsec_status(mock_ctx)
+        mock_api.get.assert_called_once_with("crowdsec.service.status")
+        mock_api.post.assert_any_call("crowdsec.decisions.search", self._SEARCH_PARAMS)
+        mock_api.post.assert_any_call("crowdsec.alerts.search", self._SEARCH_PARAMS)
         assert result["service_status"] == "running"
         assert result["decisions_count"] == 1
         assert result["alerts_count"] == 1
 
     async def test_empty_decisions_and_alerts(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(
+        mock_api.get = AsyncMock(return_value={"status": "running"})
+        mock_api.post = AsyncMock(
             side_effect=[
-                {"status": "running"},
                 {"rows": [], "rowCount": 0},
                 {"rows": [], "rowCount": 0},
             ],
@@ -108,9 +113,9 @@ class TestOpnCrowdsecStatus:
 
     async def test_limits_decisions_to_20(self, mock_api, mock_ctx):
         many_decisions = [{"id": str(i)} for i in range(30)]
-        mock_api.get = AsyncMock(
+        mock_api.get = AsyncMock(return_value={"status": "running"})
+        mock_api.post = AsyncMock(
             side_effect=[
-                {"status": "running"},
                 {"rows": many_decisions, "rowCount": 30},
                 {"rows": [], "rowCount": 0},
             ],

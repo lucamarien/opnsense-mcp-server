@@ -7,6 +7,7 @@ Best-practice guides for common OPNsense firewall configuration tasks using the 
 | Guide | Description |
 | --- | --- |
 | [WhatsApp Calling](best-practices/voip-whatsapp.md) | Allow WhatsApp voice/video calls through a default-deny firewall using URL table aliases, port restrictions, and scoped rules with savepoint protection |
+| [DDNS with Cloudflare](best-practices/ddns-cloudflare.md) | Configure Dynamic DNS with Cloudflare API Tokens, Interface checkip method, IPv6 EUI-64 addresses, and German ISP forced-disconnect scheduling |
 
 ## Contributing Guides
 
