@@ -27,5 +27,5 @@ jobs:
           context: .
           push: true
           tags: |
-            lucamarien/opnsense-mcp-server:latest
-            lucamarien/opnsense-mcp-server:${{ steps.version.outputs.version }}
+            uhlenheide/opnsense-mcp-server:latest
+            uhlenheide/opnsense-mcp-server:${{ steps.version.outputs.version }}
