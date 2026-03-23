@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-03-23
+
+### Added
+
+- **Firewall:** `opn_add_firewall_rule` now supports 8 additional parameters:
+  - `destination_not` — invert destination match (e.g. `!Private_Networks` for internet-only rules)
+  - `sequence` — control rule ordering within priority groups
+  - `source_not` — invert source match
+  - `categories` — assign category UUIDs at creation time (saves extra API roundtrip)
+  - `source_port` — source port filtering
+  - `log` — per-rule logging toggle
+  - `gateway` — policy-based routing via specific gateway
+  - `quick` — now configurable (was hardcoded to True); set False for last-match-wins logic
+
 ## [0.3.2] - 2026-03-17
 
 ### Fixed

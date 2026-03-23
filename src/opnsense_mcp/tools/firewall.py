@@ -158,8 +158,16 @@ async def opn_add_firewall_rule(
     ip_protocol: str = "inet",
     protocol: str = "any",
     source_net: str = "any",
+    source_not: bool = False,
+    source_port: str = "",
     destination_net: str = "any",
+    destination_not: bool = False,
     destination_port: str = "",
+    gateway: str = "",
+    log: bool = False,
+    quick: bool = True,
+    sequence: int = 1,
+    categories: str = "",
     description: str = "",
 ) -> dict[str, Any]:
     """Create a new MVC firewall filter rule with savepoint protection.
@@ -177,8 +185,16 @@ async def opn_add_firewall_rule(
     - ip_protocol: 'inet' (IPv4), 'inet6' (IPv6), or 'inet46' (dual-stack)
     - protocol: 'any', 'TCP', 'UDP', 'TCP/UDP', 'ICMP', etc.
     - source_net: source address/network or 'any'
+    - source_not: invert source match (True = NOT source_net)
+    - source_port: source port number or range, or empty for any
     - destination_net: destination address/network or 'any'
+    - destination_not: invert destination match (True = NOT destination_net, e.g. !Private_Networks)
     - destination_port: port number or range (e.g. '80', '1000-2000'), or empty for any
+    - gateway: force traffic via specific gateway (e.g. 'WAN_GW') for policy routing, or empty for default
+    - log: enable logging for this rule (default: off)
+    - quick: first-match wins (default: True). Set False for last-match-wins logic
+    - sequence: rule ordering within priority group (default: 1, higher = later)
+    - categories: comma-separated category UUIDs to assign to this rule
     - description: human-readable rule description
 
     Returns: dict with 'revision' (str), 'uuid' (str), and 'result' (str).
@@ -205,13 +221,23 @@ async def opn_add_firewall_rule(
         "ipprotocol": ip_protocol,
         "protocol": protocol,
         "source_net": source_net,
+        "source_not": "1" if source_not else "0",
         "destination_net": destination_net,
-        "quick": "1",
+        "destination_not": "1" if destination_not else "0",
+        "quick": "1" if quick else "0",
+        "log": "1" if log else "0",
+        "sequence": str(sequence),
         "enabled": "1",
         "description": description,
     }
+    if source_port:
+        rule["source_port"] = source_port
     if destination_port:
         rule["destination_port"] = destination_port
+    if gateway:
+        rule["gateway"] = gateway
+    if categories:
+        rule["categories"] = categories
 
     try:
         result = await api.post("firewall.add_rule", {"rule": rule})

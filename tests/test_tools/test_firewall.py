@@ -217,16 +217,28 @@ class TestOpnAddFirewallRule:
         assert rule["direction"] == "in"
         assert rule["quick"] == "1"
         assert rule["enabled"] == "1"
+        assert rule["source_not"] == "0"
+        assert rule["destination_not"] == "0"
+        assert rule["log"] == "0"
+        assert rule["sequence"] == "1"
         assert result["uuid"] == "new-rule-uuid"
         assert result["revision"] == "rev-add-1"
 
-    async def test_quick_always_set_to_1(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+    async def test_quick_defaults_to_1(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
         mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-q")
         mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-q"})
         mock_savepoint_mgr.apply = AsyncMock(return_value={})
         await opn_add_firewall_rule(mock_ctx_writes, action="block", direction="out")
         rule = mock_api_writes.post.call_args[0][1]["rule"]
         assert rule["quick"] == "1"
+
+    async def test_quick_false(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-qf")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-qf"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, quick=False)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["quick"] == "0"
 
     async def test_accepts_inet46(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
         mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-46")
@@ -259,8 +271,16 @@ class TestOpnAddFirewallRule:
             ip_protocol="inet6",
             protocol="TCP",
             source_net="192.168.1.0/24",
+            source_not=True,
+            source_port="1024-65535",
             destination_net="10.0.0.0/8",
+            destination_not=True,
             destination_port="443",
+            gateway="WAN_GW",
+            log=True,
+            quick=False,
+            sequence=50,
+            categories="cat-uuid-1,cat-uuid-2",
             description="Block outbound HTTPS",
         )
         rule = mock_api_writes.post.call_args[0][1]["rule"]
@@ -270,17 +290,85 @@ class TestOpnAddFirewallRule:
         assert rule["ipprotocol"] == "inet6"
         assert rule["protocol"] == "TCP"
         assert rule["source_net"] == "192.168.1.0/24"
+        assert rule["source_not"] == "1"
+        assert rule["source_port"] == "1024-65535"
         assert rule["destination_net"] == "10.0.0.0/8"
+        assert rule["destination_not"] == "1"
         assert rule["destination_port"] == "443"
+        assert rule["gateway"] == "WAN_GW"
+        assert rule["log"] == "1"
+        assert rule["quick"] == "0"
+        assert rule["sequence"] == "50"
+        assert rule["categories"] == "cat-uuid-1,cat-uuid-2"
         assert rule["description"] == "Block outbound HTTPS"
 
-    async def test_omits_empty_destination_port(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+    async def test_destination_not(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-dn")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-dn"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, destination_net="Private_Networks", destination_not=True)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["destination_not"] == "1"
+        assert rule["destination_net"] == "Private_Networks"
+
+    async def test_source_not(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-sn")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-sn"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, source_not=True)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["source_not"] == "1"
+
+    async def test_sequence(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-seq")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-seq"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, sequence=2121)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["sequence"] == "2121"
+
+    async def test_log_enabled(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-log")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-log"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, log=True)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["log"] == "1"
+
+    async def test_gateway(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-gw")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-gw"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, gateway="WAN_DHCP")
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["gateway"] == "WAN_DHCP"
+
+    async def test_categories(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-cat")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-cat"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, categories="uuid-a,uuid-b")
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["categories"] == "uuid-a,uuid-b"
+
+    async def test_source_port(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-sp")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-sp"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_add_firewall_rule(mock_ctx_writes, source_port="1024-65535")
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["source_port"] == "1024-65535"
+
+    async def test_omits_empty_optional_strings(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
         mock_savepoint_mgr.create = AsyncMock(return_value="rev-add-p")
         mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "uuid-p"})
         mock_savepoint_mgr.apply = AsyncMock(return_value={})
         await opn_add_firewall_rule(mock_ctx_writes)
         rule = mock_api_writes.post.call_args[0][1]["rule"]
         assert "destination_port" not in rule
+        assert "source_port" not in rule
+        assert "gateway" not in rule
+        assert "categories" not in rule
 
     async def test_fails_when_writes_disabled(self, mock_ctx_no_writes):
         with pytest.raises(WriteDisabledError):
