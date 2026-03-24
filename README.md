@@ -2,7 +2,7 @@
 
 A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for managing OPNsense firewalls through AI assistants like [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Cursor, and other MCP-compatible tools.
 
-**62 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
+**67 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
 
 ## Requirements
 
@@ -423,7 +423,7 @@ These guides show real-world MCP tool usage patterns and explain the security co
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines. Key points:
 
 1. All tests must use mocked API responses — never connect to a real OPNsense
-2. Keep total tool count under 65 (currently 62)
+2. No overlapping tools — each tool must have a distinct purpose
 3. Write clear docstrings — they're the AI's only guide to tool selection
 4. Return structured data (dicts), not formatted strings
 5. Run `make validate` before submitting

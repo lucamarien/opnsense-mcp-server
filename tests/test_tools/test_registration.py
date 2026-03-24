@@ -4,9 +4,9 @@ from __future__ import annotations
 
 
 class TestToolRegistration:
-    """Verify all tools are registered and count stays manageable."""
+    """Verify all tools are registered correctly."""
 
-    async def test_all_60_tools_registered(self):
+    async def test_all_expected_tools_registered(self):
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
@@ -47,6 +47,12 @@ class TestToolRegistration:
             "opn_dns_stats",
             "opn_reconfigure_unbound",
             "opn_add_dns_override",
+            # DNSBL
+            "opn_list_dnsbl",
+            "opn_get_dnsbl",
+            "opn_set_dnsbl",
+            "opn_add_dnsbl_allowlist",
+            "opn_remove_dnsbl_allowlist",
             # DHCP
             "opn_list_dhcp_leases",
             "opn_list_kea_leases",
@@ -85,14 +91,8 @@ class TestToolRegistration:
         }
         assert expected.issubset(tool_names), f"Missing tools: {expected - tool_names}"
 
-    async def test_tool_count_under_65(self):
+    async def test_tool_count_matches_expected(self):
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) < 65, f"Too many tools: {len(tools)} (max 65)"
-
-    async def test_tool_count_is_62(self):
-        from opnsense_mcp.server import mcp
-
-        tools = await mcp.list_tools()
-        assert len(tools) == 62, f"Expected 62 tools, got {len(tools)}"
+        assert len(tools) == 67, f"Expected 67 tools, got {len(tools)}"

@@ -136,7 +136,7 @@ pytest -v --tb=long
 - [ ] Docstrings are clear and describe when to use the tool
 - [ ] No hardcoded credentials or sensitive data
 - [ ] Write operations are guarded and use savepoints where appropriate
-- [ ] Total tool count stays under 65 (currently 62)
+- [ ] No overlapping tools — new tool has a distinct purpose from existing ones
 
 ## License
 

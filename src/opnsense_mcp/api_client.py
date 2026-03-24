@@ -222,6 +222,36 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "unbound/settings/delHostOverride",
         "unbound/settings/del_host_override",
     ),
+    # Unbound DNSBL (DNS Blocklist)
+    "unbound.search_dnsbl": (
+        "unbound/settings/searchDnsbl",
+        "unbound/settings/search_dnsbl",
+    ),
+    "unbound.get_dnsbl": (
+        "unbound/settings/getDnsbl",
+        "unbound/settings/get_dnsbl",
+    ),
+    "unbound.set_dnsbl": (
+        "unbound/settings/setDnsbl",
+        "unbound/settings/set_dnsbl",
+    ),
+    "unbound.add_dnsbl": (
+        "unbound/settings/addDnsbl",
+        "unbound/settings/add_dnsbl",
+    ),
+    "unbound.del_dnsbl": (
+        "unbound/settings/delDnsbl",
+        "unbound/settings/del_dnsbl",
+    ),
+    "unbound.toggle_dnsbl": (
+        "unbound/settings/toggleDnsbl",
+        "unbound/settings/toggle_dnsbl",
+    ),
+    "unbound.update_blocklist": (
+        "unbound/settings/updateBlocklist",
+        "unbound/settings/update_blocklist",
+    ),
+    "unbound.service.dnsbl": ("unbound/service/dnsbl", "unbound/service/dnsbl"),
     # Static routes
     "routes.search": ("routes/routes/searchroute", "routes/routes/search_route"),
     # WireGuard server/client config (read-only, for security audit)

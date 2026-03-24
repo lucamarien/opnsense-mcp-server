@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.4] - 2026-03-24
+
+### Added
+
+- **DNS:** 5 new DNSBL (DNS Blocklist) management tools:
+  - `opn_list_dnsbl` — list blocklist configurations with providers and status
+  - `opn_get_dnsbl` — get full blocklist config by UUID (providers, allowlists, settings)
+  - `opn_set_dnsbl` — update blocklist settings (read-modify-write, preserves unmodified fields)
+  - `opn_add_dnsbl_allowlist` — add domains to allowlist without overwriting existing entries
+  - `opn_remove_dnsbl_allowlist` — remove domains from allowlist
+- **DNS:** 8 new API endpoints registered for Unbound DNSBL operations
+- **Integration tests:** DNSBL read-only tests in live test suite, plus dedicated write round-trip test
+
+### Changed
+
+- **CI:** Updated GitHub Actions to Node.js 24-compatible versions (checkout v5, setup-python v6, docker/login-action v4, docker/build-push-action v7)
+- **Docs:** Replaced arbitrary tool count cap with quality guidelines (no overlapping tools, clear naming)
+
 ## [0.3.3] - 2026-03-23
 
 ### Added

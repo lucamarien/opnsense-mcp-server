@@ -44,10 +44,15 @@ from opnsense_mcp.tools.diagnostics import (
 )
 from opnsense_mcp.tools.dns import (
     opn_add_dns_override,
+    opn_add_dnsbl_allowlist,
     opn_dns_stats,
+    opn_get_dnsbl,
     opn_list_dns_forwards,
     opn_list_dns_overrides,
+    opn_list_dnsbl,
     opn_reconfigure_unbound,
+    opn_remove_dnsbl_allowlist,
+    opn_set_dnsbl,
 )
 from opnsense_mcp.tools.firewall import (
     opn_add_alias,
@@ -127,6 +132,7 @@ def _summarize(result: Any, max_chars: int = 120) -> str:
         "service_status",
         "decisions_count",
         "alerts_count",
+        "selected_providers",
     ):
         if key in result:
             parts.append(f"{key}={result[key]}")
@@ -225,6 +231,8 @@ async def main() -> int:
         ("opn_list_dns_overrides", opn_list_dns_overrides(ctx)),
         ("opn_list_dns_forwards", opn_list_dns_forwards(ctx)),
         ("opn_dns_stats", opn_dns_stats(ctx)),
+        ("opn_list_dnsbl", opn_list_dnsbl(ctx)),
+        ("opn_get_dnsbl", opn_get_dnsbl(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02")),
         ("opn_list_cron_jobs", opn_list_cron_jobs(ctx)),
         ("opn_list_dnsmasq_leases", opn_list_dnsmasq_leases(ctx)),
         ("opn_list_dnsmasq_ranges", opn_list_dnsmasq_ranges(ctx)),
@@ -366,6 +374,18 @@ async def main() -> int:
             opn_set_rule_categories(ctx, uuid="00000000-0000-0000-0000-000000000000", categories=""),
         ),
         ("opn_add_icmpv6_rules", opn_add_icmpv6_rules(ctx, interface="lan")),
+        (
+            "opn_set_dnsbl",
+            opn_set_dnsbl(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", enabled=True),
+        ),
+        (
+            "opn_add_dnsbl_allowlist",
+            opn_add_dnsbl_allowlist(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", domains="test.example.com"),
+        ),
+        (
+            "opn_remove_dnsbl_allowlist",
+            opn_remove_dnsbl_allowlist(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", domains="test.example.com"),
+        ),
     ]
     for name, coro in write_tests:
         status, summary = await _test_write_guard(name, coro)
