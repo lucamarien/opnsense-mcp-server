@@ -10,6 +10,7 @@ from opnsense_mcp.tools.system import (
     opn_gateway_status,
     opn_get_config_section,
     opn_list_services,
+    opn_mcp_info,
     opn_scan_config,
     opn_system_status,
 )
@@ -278,3 +279,45 @@ class TestOpnGetConfigSection:
         result = await opn_get_config_section(mock_ctx, section="system")
         assert result["section"] == "system"
         mock_api.get_text.assert_called()
+
+
+class TestOpnMcpInfo:
+    """Tests for opn_mcp_info."""
+
+    async def test_returns_expected_keys(self, mock_api, mock_ctx):
+        result = await opn_mcp_info(mock_ctx)
+        assert "mcp_version" in result
+        assert "write_mode" in result
+        assert "opnsense_version" in result
+        assert "api_style" in result
+
+    async def test_returns_version_string(self, mock_api, mock_ctx):
+        result = await opn_mcp_info(mock_ctx)
+        assert isinstance(result["mcp_version"], str)
+        assert result["mcp_version"]  # non-empty
+
+    async def test_write_mode_disabled(self, mock_api, mock_ctx):
+        result = await opn_mcp_info(mock_ctx)
+        assert result["write_mode"] is False
+
+    async def test_write_mode_enabled(self, mock_api_writes, mock_ctx_writes):
+        result = await opn_mcp_info(mock_ctx_writes)
+        assert result["write_mode"] is True
+
+    async def test_opnsense_version_detected(self, mock_api, mock_ctx):
+        result = await opn_mcp_info(mock_ctx)
+        assert result["opnsense_version"] == "25.1"
+
+    async def test_opnsense_version_not_detected(self, mock_api, mock_ctx):
+        mock_api._detected_version = None
+        result = await opn_mcp_info(mock_ctx)
+        assert result["opnsense_version"] is None
+
+    async def test_api_style_camelcase(self, mock_api, mock_ctx):
+        result = await opn_mcp_info(mock_ctx)
+        assert result["api_style"] == "camelCase"
+
+    async def test_api_style_snake_case(self, mock_api, mock_ctx):
+        mock_api._use_snake_case = True
+        result = await opn_mcp_info(mock_ctx)
+        assert result["api_style"] == "snake_case"

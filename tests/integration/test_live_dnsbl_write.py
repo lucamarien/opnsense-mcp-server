@@ -116,9 +116,14 @@ async def main() -> int:
             f"added={add_result.get('added', [])}",
         )
         _check(
-            "dnsbl service applied",
-            "OK" in add_result.get("applied", ""),
-            f"applied={add_result.get('applied', '?')!r}",
+            "dnsbl lists reloaded",
+            "OK" in add_result.get("dnsbl_status", ""),
+            f"dnsbl_status={add_result.get('dnsbl_status', '?')!r}",
+        )
+        _check(
+            "unbound service restarted",
+            add_result.get("service_status", "") in ("ok", "OK"),
+            f"service_status={add_result.get('service_status', '?')!r}",
         )
 
         # --- Step 4: Verify added ---

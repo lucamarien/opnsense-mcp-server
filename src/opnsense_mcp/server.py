@@ -11,6 +11,7 @@ from typing import Any
 from fastmcp import Context, FastMCP
 from fastmcp.server.lifespan import lifespan
 
+from opnsense_mcp import __version__
 from opnsense_mcp.api_client import OPNsenseAPI, SavepointManager
 from opnsense_mcp.config import load_config
 from opnsense_mcp.config_cache import ConfigCache
@@ -29,7 +30,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict[str, Any]]:
         await api.close()
 
 
-mcp = FastMCP("opnsense", lifespan=app_lifespan)
+mcp = FastMCP("opnsense", version=__version__, lifespan=app_lifespan)
 
 
 def get_api(ctx: Context) -> OPNsenseAPI:

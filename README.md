@@ -2,7 +2,7 @@
 
 A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for managing OPNsense firewalls through AI assistants like [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Cursor, and other MCP-compatible tools.
 
-**67 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
+**69 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
 
 ## Requirements
 
@@ -136,9 +136,9 @@ Add to your Cursor MCP settings (Settings > MCP):
 
 **Custom ports:** If your OPNsense web GUI runs on a non-standard port (e.g., 10443), include it in the URL: `https://192.168.1.1:10443/api`
 
-## Available Tools (62)
+## Available Tools (69)
 
-### System (6 tools)
+### System (7 tools)
 
 | Tool | Description |
 | --- | --- |
@@ -148,6 +148,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_download_config` | Download `config.xml` backup with optional sensitive data stripping. Params: `include_sensitive` (default: `false` — passwords and keys are redacted) |
 | `opn_scan_config` | Scan the full configuration, parse it into sections, and collect runtime inventory (firmware, plugins, DHCP, DNS, interfaces, services). Results are cached per session. Params: `force` |
 | `opn_get_config_section` | Get a specific config section as structured JSON. Params: `section`, `include_sensitive` |
+| `opn_mcp_info` | MCP server version, write mode status, detected OPNsense version, and API style |
 
 ### Network (5 tools)
 
@@ -179,7 +180,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_set_rule_categories` | Assign categories to a firewall rule with savepoint. Params: `uuid`, `categories` | Yes |
 | `opn_add_icmpv6_rules` | Create essential ICMPv6 rules required for IPv6 operation (NDP, RA, ping6) per RFC 4890. Params: `interface` | Yes |
 
-### DNS (5 tools)
+### DNS (11 tools)
 
 | Tool | Description | Writes |
 | --- | --- | --- |
@@ -188,6 +189,12 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_dns_stats` | Unbound resolver statistics (queries, cache hits, uptime) | No |
 | `opn_reconfigure_unbound` | Apply pending DNS resolver configuration changes | Yes |
 | `opn_add_dns_override` | Add an Unbound DNS host override (A/AAAA record) and apply immediately. Params: `hostname`, `domain`, `server`, `description` | Yes |
+| `opn_list_dnsbl` | List DNSBL blocklist configurations with providers and status. Params: `search`, `limit` | No |
+| `opn_get_dnsbl` | Get full DNSBL configuration by UUID (providers, allowlists, settings). Params: `uuid` | No |
+| `opn_set_dnsbl` | Update DNSBL settings (read-modify-write). Params: `uuid`, `enabled`, `providers`, `allowlists`, `blocklists`, `wildcards`, etc. | Yes |
+| `opn_add_dnsbl_allowlist` | Add domains to DNSBL allowlist without overwriting. Params: `uuid`, `domains` | Yes |
+| `opn_remove_dnsbl_allowlist` | Remove domains from DNSBL allowlist. Params: `uuid`, `domains` | Yes |
+| `opn_update_dnsbl` | Reload DNSBL blocklist files and restart Unbound (no config change, recovery tool) | Yes |
 
 ### DHCP (6 tools)
 

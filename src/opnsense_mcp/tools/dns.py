@@ -179,6 +179,23 @@ def _extract_dnsbl_values(form: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+async def _apply_dnsbl(ctx: Context) -> dict[str, str]:
+    """Regenerate DNSBL blocklist files and restart Unbound to apply them.
+
+    Calls ``service/dnsbl`` to regenerate blocklist files on disk, then
+    ``service/reconfigure`` to restart Unbound so the new lists are loaded
+    and the DNS cache is flushed.
+    """
+    api = get_api(ctx)
+    dnsbl_result = await api.post("unbound.service.dnsbl")
+    reconfigure_result = await api.post("unbound.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+    return {
+        "dnsbl_status": dnsbl_result.get("status", "unknown").strip(),
+        "service_status": reconfigure_result.get("status", "unknown").strip(),
+    }
+
+
 @mcp.tool()
 async def opn_list_dnsbl(
     ctx: Context,
@@ -287,7 +304,7 @@ async def opn_set_dnsbl(
     - cache_ttl: cache TTL in seconds for DNSBL responses
     - description: human-readable description
 
-    Returns: dict with 'result' and 'applied' status.
+    Returns: dict with 'result', 'dnsbl_status', and 'service_status'.
     """
     api = get_api(ctx)
     api.require_writes()
@@ -319,14 +336,13 @@ async def opn_set_dnsbl(
     if description is not None:
         current["description"] = description
 
-    # Write + apply
+    # Write + apply (regenerate blocklists and restart Unbound)
     result = await api.post("unbound.set_dnsbl", {"blocklist": current}, path_suffix=uuid)
-    apply_result = await api.post("unbound.service.dnsbl")
-    get_config_cache(ctx).invalidate()
+    apply = await _apply_dnsbl(ctx)
 
     return {
         "result": result.get("result", ""),
-        "applied": apply_result.get("status", "unknown").strip(),
+        **apply,
     }
 
 
@@ -348,7 +364,8 @@ async def opn_add_dnsbl_allowlist(
     - uuid: blocklist UUID from opn_list_dnsbl
     - domains: domains to add, comma or newline-separated
 
-    Returns: dict with 'added' (list), 'already_present' (list), and 'applied' status.
+    Returns: dict with 'added' (list), 'already_present' (list),
+    'dnsbl_status', and 'service_status'.
     """
     if not domains.strip():
         return {"error": "No domains provided."}
@@ -374,16 +391,15 @@ async def opn_add_dnsbl_allowlist(
     merged = sorted(existing | set(new_domains))
     current["allowlists"] = "\n".join(merged)
 
-    # Write + apply
+    # Write + apply (regenerate blocklists and restart Unbound)
     result = await api.post("unbound.set_dnsbl", {"blocklist": current}, path_suffix=uuid)
-    apply_result = await api.post("unbound.service.dnsbl")
-    get_config_cache(ctx).invalidate()
+    apply = await _apply_dnsbl(ctx)
 
     return {
         "result": result.get("result", ""),
         "added": added,
         "already_present": already_present,
-        "applied": apply_result.get("status", "unknown").strip(),
+        **apply,
     }
 
 
@@ -404,7 +420,8 @@ async def opn_remove_dnsbl_allowlist(
     - uuid: blocklist UUID from opn_list_dnsbl
     - domains: domains to remove, comma or newline-separated
 
-    Returns: dict with 'removed' (list), 'not_found' (list), and 'applied' status.
+    Returns: dict with 'removed' (list), 'not_found' (list),
+    'dnsbl_status', and 'service_status'.
     """
     if not domains.strip():
         return {"error": "No domains provided."}
@@ -430,14 +447,32 @@ async def opn_remove_dnsbl_allowlist(
     remaining = sorted(existing - set(remove_domains))
     current["allowlists"] = "\n".join(remaining)
 
-    # Write + apply
+    # Write + apply (regenerate blocklists and restart Unbound)
     result = await api.post("unbound.set_dnsbl", {"blocklist": current}, path_suffix=uuid)
-    apply_result = await api.post("unbound.service.dnsbl")
-    get_config_cache(ctx).invalidate()
+    apply = await _apply_dnsbl(ctx)
 
     return {
         "result": result.get("result", ""),
         "removed": removed,
         "not_found": not_found,
-        "applied": apply_result.get("status", "unknown").strip(),
+        **apply,
     }
+
+
+@mcp.tool()
+async def opn_update_dnsbl(ctx: Context) -> dict[str, Any]:
+    """Reload DNSBL blocklist files and restart Unbound to apply them.
+
+    Use this when DNSBL lists need to be refreshed without changing the
+    configuration — for example after a service restart that lost loaded
+    lists, or to force Unbound to pick up previously generated blocklist
+    files. This flushes the DNS cache, so previously cached blocked
+    (or unblocked) domains will be re-evaluated.
+
+    NOTE: This does not use savepoint protection. DNS changes take effect
+    immediately and cannot be auto-reverted.
+    Returns: dict with 'dnsbl_status' and 'service_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    return await _apply_dnsbl(ctx)

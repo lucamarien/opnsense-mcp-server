@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.3.5] - 2026-03-25
+
+### Added
+
+- **System:** `opn_mcp_info` — query MCP server version, write mode, detected OPNsense version, and API style
+- **System:** MCP server version now included in protocol-level `initialize` handshake via FastMCP
+- **DNS:** `opn_update_dnsbl` — reload DNSBL blocklist files and restart Unbound without config changes (manual recovery tool)
+
+### Fixed
+
+- **DNS:** DNSBL tools (`opn_set_dnsbl`, `opn_add_dnsbl_allowlist`, `opn_remove_dnsbl_allowlist`) now restart Unbound after regenerating blocklist files, flushing DNS cache so changes take effect immediately. Previously, old cached `0.0.0.0` entries (TTL 72000s) persisted and toggling DNSBL off→on left lists unloaded.
+
+### Changed
+
+- **DNS:** DNSBL tool response format changed from `{"applied": "OK"}` to `{"dnsbl_status": "OK", "service_status": "ok"}` for clearer status reporting
+
 ## [0.3.4] - 2026-03-24
 
 ### Added

@@ -19,6 +19,7 @@ from opnsense_mcp.tools.dns import (
     opn_reconfigure_unbound,
     opn_remove_dnsbl_allowlist,
     opn_set_dnsbl,
+    opn_update_dnsbl,
 )
 
 
@@ -358,22 +359,24 @@ class TestOpnSetDnsbl:
 
     async def test_read_modify_write_calls(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK\n\n"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK\n\n"}, {"status": "ok"}])
         result = await opn_set_dnsbl(mock_ctx_writes, uuid=_UUID, enabled=False)
         # Verify read
         mock_api_writes.get.assert_called_once_with("unbound.get_dnsbl", path_suffix=_UUID)
-        # Verify write + apply (2 POST calls)
-        assert mock_api_writes.post.call_count == 2
+        # Verify write + apply (3 POST calls: set_dnsbl + service.dnsbl + service.reconfigure)
+        assert mock_api_writes.post.call_count == 3
         set_call = mock_api_writes.post.call_args_list[0]
         assert set_call[0][0] == "unbound.set_dnsbl"
         assert set_call[1]["path_suffix"] == _UUID
-        apply_call = mock_api_writes.post.call_args_list[1]
-        assert apply_call[0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_args_list[1][0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_args_list[2][0][0] == "unbound.service.reconfigure"
         assert result["result"] == "saved"
+        assert result["dnsbl_status"] == "OK"
+        assert result["service_status"] == "ok"
 
     async def test_only_changes_provided_fields(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         await opn_set_dnsbl(mock_ctx_writes, uuid=_UUID, description="New desc")
         payload = mock_api_writes.post.call_args_list[0][0][1]["blocklist"]
         # Description changed
@@ -385,14 +388,14 @@ class TestOpnSetDnsbl:
 
     async def test_updates_providers(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         await opn_set_dnsbl(mock_ctx_writes, uuid=_UUID, providers="hgz003,sb")
         payload = mock_api_writes.post.call_args_list[0][0][1]["blocklist"]
         assert payload["type"] == "hgz003,sb"
 
     async def test_invalidates_cache(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         await opn_set_dnsbl(mock_ctx_writes, uuid=_UUID, enabled=True)
         cache = mock_ctx_writes.lifespan_context["config_cache"]
         assert cache.is_stale
@@ -412,7 +415,7 @@ class TestOpnAddDnsblAllowlist:
 
     async def test_appends_to_existing_allowlist(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_add_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="new.example.com")
         payload = mock_api_writes.post.call_args_list[0][0][1]["blocklist"]
         assert "new.example.com" in payload["allowlists"]
@@ -421,35 +424,36 @@ class TestOpnAddDnsblAllowlist:
 
     async def test_deduplicates_domains(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_add_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="existing.example.com")
         assert result["already_present"] == ["existing.example.com"]
         assert result["added"] == []
 
     async def test_accepts_comma_separated(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_add_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="a.com,b.com")
         assert sorted(result["added"]) == ["a.com", "b.com"]
 
     async def test_applies_and_invalidates_cache(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         await opn_add_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="test.com")
-        apply_call = mock_api_writes.post.call_args_list[1]
-        assert apply_call[0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_count == 3
+        assert mock_api_writes.post.call_args_list[1][0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_args_list[2][0][0] == "unbound.service.reconfigure"
         cache = mock_ctx_writes.lifespan_context["config_cache"]
         assert cache.is_stale
 
     async def test_accepts_newline_separated(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_add_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="a.com\nb.com")
         assert sorted(result["added"]) == ["a.com", "b.com"]
 
     async def test_handles_whitespace(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_add_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="  a.com  ,  b.com  ")
         assert sorted(result["added"]) == ["a.com", "b.com"]
 
@@ -472,7 +476,7 @@ class TestOpnRemoveDnsblAllowlist:
 
     async def test_removes_domains(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_remove_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="existing.example.com")
         payload = mock_api_writes.post.call_args_list[0][0][1]["blocklist"]
         assert "existing.example.com" not in payload["allowlists"]
@@ -481,17 +485,18 @@ class TestOpnRemoveDnsblAllowlist:
 
     async def test_reports_not_found(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_remove_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="nonexistent.com")
         assert result["not_found"] == ["nonexistent.com"]
         assert result["removed"] == []
 
     async def test_applies_and_invalidates_cache(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.get = AsyncMock(return_value=_DNSBL_FORM)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         await opn_remove_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="existing.example.com")
-        apply_call = mock_api_writes.post.call_args_list[1]
-        assert apply_call[0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_count == 3
+        assert mock_api_writes.post.call_args_list[1][0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_args_list[2][0][0] == "unbound.service.reconfigure"
         cache = mock_ctx_writes.lifespan_context["config_cache"]
         assert cache.is_stale
 
@@ -508,7 +513,7 @@ class TestOpnRemoveDnsblAllowlist:
             },
         }
         mock_api_writes.get = AsyncMock(return_value=form)
-        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}])
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "OK"}, {"status": "ok"}])
         result = await opn_remove_dnsbl_allowlist(
             mock_ctx_writes, uuid=_UUID, domains="existing.example.com\nother.example.com"
         )
@@ -518,3 +523,32 @@ class TestOpnRemoveDnsblAllowlist:
     async def test_empty_domains_returns_error(self, mock_ctx_writes):
         result = await opn_remove_dnsbl_allowlist(mock_ctx_writes, uuid=_UUID, domains="")
         assert "error" in result
+
+
+class TestOpnUpdateDnsbl:
+    """Tests for opn_update_dnsbl."""
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_dnsbl(mock_ctx)
+
+    async def test_calls_dnsbl_and_reconfigure(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"status": "OK\n\n"}, {"status": "ok"}])
+        result = await opn_update_dnsbl(mock_ctx_writes)
+        assert mock_api_writes.post.call_count == 2
+        assert mock_api_writes.post.call_args_list[0][0][0] == "unbound.service.dnsbl"
+        assert mock_api_writes.post.call_args_list[1][0][0] == "unbound.service.reconfigure"
+        assert result["dnsbl_status"] == "OK"
+        assert result["service_status"] == "ok"
+
+    async def test_invalidates_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"status": "OK"}, {"status": "ok"}])
+        await opn_update_dnsbl(mock_ctx_writes)
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        assert cache.is_stale
+
+    async def test_handles_missing_status(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{}, {}])
+        result = await opn_update_dnsbl(mock_ctx_writes)
+        assert result["dnsbl_status"] == "unknown"
+        assert result["service_status"] == "unknown"
