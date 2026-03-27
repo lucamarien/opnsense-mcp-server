@@ -2,7 +2,7 @@
 
 A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for managing OPNsense firewalls through AI assistants like [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Cursor, and other MCP-compatible tools.
 
-**69 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
+**81 tools** across 10 domains: system, firewall, network, DNS, DHCP, VPN, HAProxy, services, diagnostics, and security.
 
 ## Requirements
 
@@ -136,7 +136,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 
 **Custom ports:** If your OPNsense web GUI runs on a non-standard port (e.g., 10443), include it in the URL: `https://192.168.1.1:10443/api`
 
-## Available Tools (69)
+## Available Tools (81)
 
 ### System (7 tools)
 
@@ -160,7 +160,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_ipv6_status` | IPv6 configuration and address status for all interfaces (method, live addresses, summary) |
 | `opn_list_static_routes` | Configured static routes. Params: `search`, `limit` |
 
-### Firewall (15 tools)
+### Firewall (21 tools)
 
 | Tool | Description | Writes |
 | --- | --- | --- |
@@ -179,8 +179,14 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_delete_firewall_category` | Delete a firewall rule category by UUID with savepoint. Params: `uuid` | Yes |
 | `opn_set_rule_categories` | Assign categories to a firewall rule with savepoint. Params: `uuid`, `categories` | Yes |
 | `opn_add_icmpv6_rules` | Create essential ICMPv6 rules required for IPv6 operation (NDP, RA, ping6) per RFC 4890. Params: `interface` | Yes |
+| `opn_update_alias` | Update an existing alias (name, content, type, description). Read-modify-write. Params: `uuid`, `name`, `content`, `description`, `alias_type`, `enabled` | Yes |
+| `opn_delete_alias` | Delete an alias by UUID. Check rule references first. Params: `uuid` | Yes |
+| `opn_toggle_alias` | Toggle alias enabled/disabled state. Params: `uuid` | Yes |
+| `opn_update_firewall_rule` | Update filter rule fields with savepoint. Params: `uuid`, `action`, `direction`, `interface`, `ip_protocol`, `protocol`, `source_net`, `source_not`, `source_port`, `destination_net`, `destination_not`, `destination_port`, `gateway`, `log`, `quick`, `sequence`, `categories`, `description`, `enabled` | Yes |
+| `opn_update_nat_rule` | Update NAT port forwarding rule with savepoint. Params: `uuid`, `interface`, `protocol`, `destination_port`, `target_ip`, `target_port`, `description`, `enabled` | Yes |
+| `opn_delete_nat_rule` | Delete a NAT port forwarding rule by UUID with savepoint. Params: `uuid` | Yes |
 
-### DNS (11 tools)
+### DNS (13 tools)
 
 | Tool | Description | Writes |
 | --- | --- | --- |
@@ -195,8 +201,10 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_add_dnsbl_allowlist` | Add domains to DNSBL allowlist without overwriting. Params: `uuid`, `domains` | Yes |
 | `opn_remove_dnsbl_allowlist` | Remove domains from DNSBL allowlist. Params: `uuid`, `domains` | Yes |
 | `opn_update_dnsbl` | Reload DNSBL blocklist files and restart Unbound (no config change, recovery tool) | Yes |
+| `opn_update_dns_override` | Update an Unbound DNS host override and apply immediately. Params: `uuid`, `hostname`, `domain`, `server`, `description`, `enabled` | Yes |
+| `opn_delete_dns_override` | Delete an Unbound DNS host override and apply immediately. Params: `uuid` | Yes |
 
-### DHCP (6 tools)
+### DHCP (8 tools)
 
 | Tool | Description | Writes |
 | --- | --- | --- |
@@ -206,6 +214,8 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `opn_list_dnsmasq_ranges` | Configured DHCP address ranges (both DHCPv4 and DHCPv6 with RA config). Params: `search`, `limit` | No |
 | `opn_add_dnsmasq_range` | Create a new DHCP range (IPv4 or IPv6 with Router Advertisement configuration). Params: `interface`, `start_addr`, `end_addr`, `prefix_len`, `ra_mode`, `lease_time`, `description` | Yes |
 | `opn_reconfigure_dnsmasq` | Apply pending dnsmasq DNS/DHCP configuration changes | Yes |
+| `opn_update_dnsmasq_range` | Update a DHCP range (addresses, lease time, RA config) and apply. Params: `uuid`, `interface`, `start_addr`, `end_addr`, `prefix_len`, `ra_mode`, `lease_time`, `description`, `enabled` | Yes |
+| `opn_delete_dnsmasq_range` | Delete a DHCP range by UUID and apply. Params: `uuid` | Yes |
 
 ### VPN (3 tools)
 
@@ -232,7 +242,7 @@ Full configuration management for the HAProxy load balancer (requires os-haproxy
 
 > **Note:** HAProxy changes do NOT use savepoint protection — they apply immediately on reconfigure. Always call `opn_haproxy_configtest` before `opn_reconfigure_haproxy`.
 
-### Services (9 tools)
+### Services (11 tools)
 
 | Tool | Description | Writes |
 | --- | --- | --- |
@@ -243,6 +253,8 @@ Full configuration management for the HAProxy load balancer (requires os-haproxy
 | `opn_list_ddns_accounts` | Dynamic DNS accounts and their update status. Params: `search`, `limit` | No |
 | `opn_add_ddns_account` | Create a new Dynamic DNS account. Params: `service`, `hostname`, `username`, `password`, `checkip`, `interface`, `description` | Yes |
 | `opn_reconfigure_ddclient` | Apply pending Dynamic DNS configuration changes | Yes |
+| `opn_update_ddns_account` | Update a Dynamic DNS account (password is write-only). Params: `uuid`, `service`, `hostname`, `username`, `password`, `checkip`, `interface`, `description`, `enabled` | Yes |
+| `opn_delete_ddns_account` | Delete a Dynamic DNS account by UUID. Params: `uuid` | Yes |
 | `opn_mdns_repeater_status` | mDNS Repeater status and configuration (enabled, interfaces, blocklist). Requires `os-mdns-repeater` plugin | No |
 | `opn_configure_mdns_repeater` | Configure mDNS Repeater for cross-VLAN device discovery (HomeKit, Chromecast, AirPlay). Params: `enabled`, `interfaces` | Yes |
 

@@ -11,6 +11,7 @@ from opnsense_mcp.tools.dns import (
     _extract_dnsbl_values,
     opn_add_dns_override,
     opn_add_dnsbl_allowlist,
+    opn_delete_dns_override,
     opn_dns_stats,
     opn_get_dnsbl,
     opn_list_dns_forwards,
@@ -19,6 +20,7 @@ from opnsense_mcp.tools.dns import (
     opn_reconfigure_unbound,
     opn_remove_dnsbl_allowlist,
     opn_set_dnsbl,
+    opn_update_dns_override,
     opn_update_dnsbl,
 )
 
@@ -552,3 +554,113 @@ class TestOpnUpdateDnsbl:
         result = await opn_update_dnsbl(mock_ctx_writes)
         assert result["dnsbl_status"] == "unknown"
         assert result["service_status"] == "unknown"
+
+
+class TestOpnUpdateDnsOverride:
+    """Tests for opn_update_dns_override."""
+
+    async def test_updates_with_partial_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        result = await opn_update_dns_override(
+            mock_ctx_writes,
+            uuid="dns-uuid-1",
+            server="10.0.0.5",
+        )
+        set_call = mock_api_writes.post.call_args_list[0]
+        assert set_call[0][0] == "unbound.set_host_override"
+        assert set_call[0][1] == {"host": {"server": "10.0.0.5"}}
+        assert set_call[1]["path_suffix"] == "dns-uuid-1"
+        assert result["result"] == "saved"
+        assert result["uuid"] == "dns-uuid-1"
+        assert result["applied"] == "ok"
+
+    async def test_updates_multiple_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_dns_override(
+            mock_ctx_writes,
+            uuid="dns-uuid-1",
+            hostname="newhost",
+            domain="example.com",
+            server="10.0.0.1",
+            description="Updated",
+            enabled=False,
+        )
+        host = mock_api_writes.post.call_args_list[0][0][1]["host"]
+        assert host["hostname"] == "newhost"
+        assert host["domain"] == "example.com"
+        assert host["server"] == "10.0.0.1"
+        assert host["description"] == "Updated"
+        assert host["enabled"] == "0"
+
+    async def test_validates_hostname(self, mock_ctx_writes):
+        result = await opn_update_dns_override(mock_ctx_writes, uuid="dns-uuid-1", hostname="invalid host!")
+        assert "error" in result
+        assert "hostname" in result["error"]
+
+    async def test_validates_domain(self, mock_ctx_writes):
+        result = await opn_update_dns_override(mock_ctx_writes, uuid="dns-uuid-1", domain="not valid!")
+        assert "error" in result
+        assert "domain" in result["error"]
+
+    async def test_validates_server_ip(self, mock_ctx_writes):
+        result = await opn_update_dns_override(mock_ctx_writes, uuid="dns-uuid-1", server="not-an-ip")
+        assert "error" in result
+        assert "server" in result["error"]
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_dns_override(mock_ctx, uuid="dns-uuid-1", server="10.0.0.1")
+
+    async def test_reconfigures_unbound_after_update(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_dns_override(mock_ctx_writes, uuid="dns-uuid-1", server="10.0.0.1")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "unbound.service.reconfigure"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_update_dns_override(mock_ctx_writes, uuid="dns-uuid-1", server="10.0.0.1")
+        assert cache._stale
+
+
+class TestOpnDeleteDnsOverride:
+    """Tests for opn_delete_dns_override."""
+
+    async def test_deletes_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        result = await opn_delete_dns_override(mock_ctx_writes, uuid="dns-to-delete")
+        mock_api_writes.post.assert_any_call("unbound.del_host_override", path_suffix="dns-to-delete")
+        assert result["result"] == "deleted"
+        assert result["uuid"] == "dns-to-delete"
+        assert result["applied"] == "ok"
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_delete_dns_override(mock_ctx, uuid="dns-uuid-1")
+
+    async def test_reconfigures_unbound(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        await opn_delete_dns_override(mock_ctx_writes, uuid="dns-uuid-1")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "unbound.service.reconfigure"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_delete_dns_override(mock_ctx_writes, uuid="dns-uuid-1")
+        assert cache._stale

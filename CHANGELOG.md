@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-03-27
+
+### Added
+
+- **Firewall:** 6 new CRUD tools for full alias and rule lifecycle management:
+  - `opn_update_alias` — update alias name, content, type, or description (read-modify-write)
+  - `opn_delete_alias` — delete an alias by UUID
+  - `opn_toggle_alias` — toggle alias enabled/disabled state
+  - `opn_update_firewall_rule` — update any field on a filter rule (savepoint-protected)
+  - `opn_update_nat_rule` — update a NAT port forwarding rule (savepoint-protected)
+  - `opn_delete_nat_rule` — delete a NAT port forwarding rule (savepoint-protected)
+- **DNS:** 2 new tools completing DNS override lifecycle:
+  - `opn_update_dns_override` — update hostname, domain, server, or description
+  - `opn_delete_dns_override` — delete a DNS host override
+- **DHCP:** 2 new tools completing dnsmasq range lifecycle:
+  - `opn_update_dnsmasq_range` — update range addresses, lease time, or RA config
+  - `opn_delete_dnsmasq_range` — delete a DHCP range
+- **Services:** 2 new tools completing DDNS account lifecycle:
+  - `opn_update_ddns_account` — update DDNS account settings (password write-only)
+  - `opn_delete_ddns_account` — delete a DDNS account
+- 10 new API endpoint registrations with dual camelCase/snake_case support
+
 ## [0.3.5] - 2026-03-25
 
 ### Added

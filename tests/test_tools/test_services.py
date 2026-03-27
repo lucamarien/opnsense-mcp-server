@@ -12,11 +12,13 @@ from opnsense_mcp.tools.services import (
     opn_configure_mdns_repeater,
     opn_crowdsec_alerts,
     opn_crowdsec_status,
+    opn_delete_ddns_account,
     opn_list_acme_certs,
     opn_list_cron_jobs,
     opn_list_ddns_accounts,
     opn_mdns_repeater_status,
     opn_reconfigure_ddclient,
+    opn_update_ddns_account,
 )
 
 
@@ -414,3 +416,107 @@ class TestOpnConfigureMdnsRepeater:
         payload = set_call[0][1]
         assert payload["mdnsrepeater"]["enabled"] == "0"
         assert result["enabled"] == "0"
+
+
+class TestOpnUpdateDdnsAccount:
+    """Tests for opn_update_ddns_account."""
+
+    async def test_updates_with_partial_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        result = await opn_update_ddns_account(
+            mock_ctx_writes,
+            uuid="ddns-uuid-1",
+            hostname="new.example.com",
+        )
+        set_call = mock_api_writes.post.call_args_list[0]
+        assert set_call[0][0] == "dyndns.accounts.set"
+        assert set_call[0][1] == {"account": {"hostname": "new.example.com"}}
+        assert set_call[1]["path_suffix"] == "ddns-uuid-1"
+        assert result["result"] == "saved"
+        assert result["uuid"] == "ddns-uuid-1"
+
+    async def test_updates_multiple_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_ddns_account(
+            mock_ctx_writes,
+            uuid="ddns-uuid-1",
+            service="cloudflare",
+            hostname="fw.example.com",
+            username="apikey",
+            password="newsecret",
+            enabled=False,
+        )
+        account = mock_api_writes.post.call_args_list[0][0][1]["account"]
+        assert account["service"] == "cloudflare"
+        assert account["hostname"] == "fw.example.com"
+        assert account["username"] == "apikey"
+        assert account["password"] == "newsecret"
+        assert account["enabled"] == "0"
+
+    async def test_does_not_include_password_in_response(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        result = await opn_update_ddns_account(
+            mock_ctx_writes,
+            uuid="ddns-uuid-1",
+            password="secret123",
+        )
+        assert "password" not in result
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_ddns_account(mock_ctx, uuid="ddns-uuid-1", hostname="test.com")
+
+    async def test_reconfigures_ddclient(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1", hostname="test.com")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dyndns.service.reconfigure"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_update_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1", hostname="test.com")
+        assert cache._stale
+
+
+class TestOpnDeleteDdnsAccount:
+    """Tests for opn_delete_ddns_account."""
+
+    async def test_deletes_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        result = await opn_delete_ddns_account(mock_ctx_writes, uuid="ddns-to-delete")
+        mock_api_writes.post.assert_any_call("dyndns.accounts.del", path_suffix="ddns-to-delete")
+        assert result["result"] == "deleted"
+        assert result["uuid"] == "ddns-to-delete"
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_delete_ddns_account(mock_ctx, uuid="ddns-uuid-1")
+
+    async def test_reconfigures_ddclient(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        await opn_delete_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dyndns.service.reconfigure"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_delete_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1")
+        assert cache._stale

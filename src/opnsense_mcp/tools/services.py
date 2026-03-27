@@ -8,6 +8,8 @@ from fastmcp import Context
 
 from opnsense_mcp.server import get_api, get_config_cache, mcp
 
+_SENSITIVE_FIELDS = frozenset({"password", "%password"})
+
 # --- Dynamic DNS ---
 
 
@@ -38,7 +40,6 @@ async def opn_list_ddns_accounts(
         {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
     )
     # Sanitize: strip credentials from search results
-    _SENSITIVE_FIELDS = {"password", "%password"}
     for row in result.get("rows", []):
         for field in _SENSITIVE_FIELDS:
             if field in row:
@@ -113,6 +114,98 @@ async def opn_add_ddns_account(
     return {
         "result": add_result.get("result", "unknown"),
         "uuid": add_result.get("uuid", ""),
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_update_ddns_account(
+    ctx: Context,
+    uuid: str,
+    service: str | None = None,
+    hostname: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    checkip: str | None = None,
+    interface: str | None = None,
+    description: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update a Dynamic DNS account by UUID and apply the configuration.
+
+    Use this when you need to change the hostname, provider, credentials, or
+    other properties of a DDNS account. Only the parameters you provide are
+    changed; all other settings are preserved.
+
+    After update, the ddclient service is automatically reconfigured. Changes
+    take effect immediately.
+    Use opn_list_ddns_accounts first to find the UUID.
+
+    Parameters:
+    - uuid: account UUID (from opn_list_ddns_accounts)
+    - service: DDNS provider name (e.g. 'cloudflare', 'dyndns', 'noip')
+    - hostname: fully qualified domain name to update
+    - username: provider username or API key
+    - password: provider password or API token
+    - checkip: IP check method (e.g. 'web_dyndns', 'if')
+    - interface: network interface name (e.g. 'wan')
+    - description: human-readable description
+    - enabled: enable/disable the account
+
+    Returns: dict with 'result' (str), 'uuid' (str), and 'reconfigure_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+
+    account_config: dict[str, str] = {}
+    if service is not None:
+        account_config["service"] = service
+    if hostname is not None:
+        account_config["hostname"] = hostname
+    if username is not None:
+        account_config["username"] = username
+    if password is not None:
+        account_config["password"] = password
+    if checkip is not None:
+        account_config["checkip"] = checkip
+    if interface is not None:
+        account_config["interface"] = interface
+    if description is not None:
+        account_config["description"] = description
+    if enabled is not None:
+        account_config["enabled"] = "1" if enabled else "0"
+
+    result = await api.post("dyndns.accounts.set", {"account": account_config}, path_suffix=uuid)
+    reconfigure_result = await api.post("dyndns.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_delete_ddns_account(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete a Dynamic DNS account by UUID and apply the configuration.
+
+    The deletion is applied immediately (ddclient is reconfigured automatically).
+    Use opn_list_ddns_accounts first to find the UUID.
+    Returns: dict with 'result' (str), 'uuid' (str), and 'reconfigure_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("dyndns.accounts.del", path_suffix=uuid)
+    reconfigure_result = await api.post("dyndns.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
         "reconfigure_status": reconfigure_result.get("status", "unknown"),
     }
 

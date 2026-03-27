@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,15 +15,21 @@ from opnsense_mcp.tools.firewall import (
     opn_add_icmpv6_rules,
     opn_add_nat_rule,
     opn_confirm_changes,
+    opn_delete_alias,
     opn_delete_firewall_category,
     opn_delete_firewall_rule,
+    opn_delete_nat_rule,
     opn_firewall_log,
     opn_list_firewall_aliases,
     opn_list_firewall_categories,
     opn_list_firewall_rules,
     opn_list_nat_rules,
     opn_set_rule_categories,
+    opn_toggle_alias,
     opn_toggle_firewall_rule,
+    opn_update_alias,
+    opn_update_firewall_rule,
+    opn_update_nat_rule,
 )
 
 
@@ -779,3 +786,331 @@ class TestOpnAddIcmpv6Rules:
     async def test_fails_when_writes_disabled(self, mock_ctx_no_writes):
         with pytest.raises(WriteDisabledError):
             await opn_add_icmpv6_rules(mock_ctx_no_writes, interface="lan")
+
+
+class TestOpnUpdateAlias:
+    """Tests for opn_update_alias."""
+
+    _CURRENT_ALIAS = {
+        "alias": {
+            "name": "my_hosts",
+            "type": "host",
+            "content": "192.168.1.1\n192.168.1.2",
+            "description": "My hosts",
+            "enabled": "1",
+            "proto": "",
+        },
+    }
+
+    async def test_updates_name_only(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        result = await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", name="renamed_hosts")
+        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        assert alias["name"] == "renamed_hosts"
+        assert alias["type"] == "host"
+        assert alias["content"] == "192.168.1.1\n192.168.1.2"
+        assert result["result"] == "saved"
+        assert result["uuid"] == "alias-uuid-1"
+
+    async def test_updates_content_only(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", content="10.0.0.1\n10.0.0.2")
+        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        assert alias["content"] == "10.0.0.1\n10.0.0.2"
+        assert alias["name"] == "my_hosts"
+
+    async def test_updates_multiple_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        await opn_update_alias(
+            mock_ctx_writes,
+            uuid="alias-uuid-1",
+            name="new_name",
+            content="10.0.0.0/24",
+            alias_type="network",
+            description="Updated",
+            enabled=False,
+        )
+        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        assert alias["name"] == "new_name"
+        assert alias["content"] == "10.0.0.0/24"
+        assert alias["type"] == "network"
+        assert alias["description"] == "Updated"
+        assert alias["enabled"] == "0"
+
+    async def test_validates_name_regex(self, mock_ctx_writes):
+        result = await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", name="invalid name!")
+        assert "error" in result
+        assert "name" in result["error"]
+
+    async def test_validates_alias_type(self, mock_ctx_writes):
+        result = await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", alias_type="bogus")
+        assert "error" in result
+        assert "alias_type" in result["error"]
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_alias(mock_ctx, uuid="alias-uuid-1", name="new")
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", name="new")
+        assert cache._stale
+
+    async def test_calls_get_then_set(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", name="new")
+        mock_api_writes.get.assert_called_once_with("firewall.alias.get", path_suffix="alias-uuid-1")
+        mock_api_writes.post.assert_called_once()
+        assert mock_api_writes.post.call_args[0][0] == "firewall.alias.set"
+        assert mock_api_writes.post.call_args[1]["path_suffix"] == "alias-uuid-1"
+
+
+class TestOpnDeleteAlias:
+    """Tests for opn_delete_alias."""
+
+    async def test_deletes_by_uuid(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
+        result = await opn_delete_alias(mock_ctx_writes, uuid="alias-to-delete")
+        mock_api_writes.post.assert_called_once_with("firewall.alias.del", path_suffix="alias-to-delete")
+        assert result["result"] == "deleted"
+        assert result["uuid"] == "alias-to-delete"
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_delete_alias(mock_ctx, uuid="alias-uuid-1")
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_delete_alias(mock_ctx_writes, uuid="alias-uuid-1")
+        assert cache._stale
+
+    async def test_returns_result(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
+        result = await opn_delete_alias(mock_ctx_writes, uuid="alias-uuid-1")
+        assert "result" in result
+        assert "uuid" in result
+
+
+class TestOpnToggleAlias:
+    """Tests for opn_toggle_alias."""
+
+    async def test_toggles_by_uuid(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "toggled"})
+        result = await opn_toggle_alias(mock_ctx_writes, uuid="alias-toggle-1")
+        mock_api_writes.post.assert_called_once_with("firewall.alias.toggle", path_suffix="alias-toggle-1")
+        assert result["result"] == "toggled"
+        assert result["uuid"] == "alias-toggle-1"
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_toggle_alias(mock_ctx, uuid="alias-uuid-1")
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "toggled"})
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_toggle_alias(mock_ctx_writes, uuid="alias-uuid-1")
+        assert cache._stale
+
+    async def test_returns_result(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "toggled"})
+        result = await opn_toggle_alias(mock_ctx_writes, uuid="alias-uuid-1")
+        assert "result" in result
+        assert "uuid" in result
+
+
+class TestOpnUpdateFirewallRule:
+    """Tests for opn_update_firewall_rule."""
+
+    async def test_updates_with_savepoint(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-upd-1")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        result = await opn_update_firewall_rule(
+            mock_ctx_writes,
+            uuid="rule-uuid-1",
+            action="block",
+            description="Updated rule",
+        )
+        mock_savepoint_mgr.create.assert_called_once()
+        mock_api_writes.post.assert_called_once_with(
+            "firewall.set_rule",
+            {"rule": {"action": "block", "description": "Updated rule"}},
+            path_suffix="rule-uuid-1",
+        )
+        mock_savepoint_mgr.apply.assert_called_once_with("rev-upd-1")
+        assert result["revision"] == "rev-upd-1"
+        assert result["uuid"] == "rule-uuid-1"
+
+    async def test_sends_only_provided_fields(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-upd-partial")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", destination_port="443")
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule == {"destination_port": "443"}
+
+    async def test_converts_bool_fields(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-upd-bool")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_update_firewall_rule(
+            mock_ctx_writes,
+            uuid="rule-uuid-1",
+            log=True,
+            quick=False,
+            source_not=True,
+            destination_not=False,
+            enabled=False,
+        )
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["log"] == "1"
+        assert rule["quick"] == "0"
+        assert rule["source_not"] == "1"
+        assert rule["destination_not"] == "0"
+        assert rule["enabled"] == "0"
+
+    async def test_converts_sequence_to_string(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-upd-seq")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", sequence=42)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["sequence"] == "42"
+
+    async def test_validates_action_if_provided(self, mock_ctx_writes):
+        result = await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", action="allow")
+        assert "error" in result
+        assert "action" in result["error"]
+
+    async def test_validates_direction_if_provided(self, mock_ctx_writes):
+        result = await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", direction="forward")
+        assert "error" in result
+        assert "direction" in result["error"]
+
+    async def test_validates_ip_protocol_if_provided(self, mock_ctx_writes):
+        result = await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", ip_protocol="ipv4")
+        assert "error" in result
+        assert "ip_protocol" in result["error"]
+
+    async def test_fails_when_writes_disabled(self, mock_ctx_no_writes):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_firewall_rule(mock_ctx_no_writes, uuid="rule-uuid-1", action="block")
+
+    async def test_returns_error_on_api_failure(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-upd-err")
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Validation error"))
+        result = await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", action="block")
+        assert "error" in result
+        assert result["revision"] == "rev-upd-err"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-upd-cache")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_update_firewall_rule(mock_ctx_writes, uuid="rule-uuid-1", action="pass")
+        assert cache._stale
+
+
+class TestOpnUpdateNatRule:
+    """Tests for opn_update_nat_rule."""
+
+    async def test_updates_with_savepoint(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-upd-1")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        result = await opn_update_nat_rule(
+            mock_ctx_writes,
+            uuid="nat-uuid-1",
+            target_ip="10.0.0.5",
+        )
+        mock_savepoint_mgr.create.assert_called_once()
+        mock_api_writes.post.assert_called_once_with(
+            "nat.dnat.set_rule",
+            {"rule": {"target_ip": "10.0.0.5"}},
+            path_suffix="nat-uuid-1",
+        )
+        mock_savepoint_mgr.apply.assert_called_once_with("rev-nat-upd-1")
+        assert result["revision"] == "rev-nat-upd-1"
+        assert result["uuid"] == "nat-uuid-1"
+
+    async def test_sends_only_provided_fields(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-upd-partial")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_update_nat_rule(
+            mock_ctx_writes,
+            uuid="nat-uuid-1",
+            target_port="8080",
+            description="Updated",
+        )
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule == {"target_port": "8080", "description": "Updated"}
+
+    async def test_validates_protocol_if_provided(self, mock_ctx_writes):
+        result = await opn_update_nat_rule(mock_ctx_writes, uuid="nat-uuid-1", protocol="ICMP")
+        assert "error" in result
+        assert "protocol" in result["error"]
+
+    async def test_converts_enabled_bool(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-upd-en")
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        await opn_update_nat_rule(mock_ctx_writes, uuid="nat-uuid-1", enabled=False)
+        rule = mock_api_writes.post.call_args[0][1]["rule"]
+        assert rule["enabled"] == "0"
+
+    async def test_fails_when_writes_disabled(self, mock_ctx_no_writes):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_nat_rule(mock_ctx_no_writes, uuid="nat-uuid-1", target_ip="10.0.0.1")
+
+    async def test_returns_error_on_api_failure(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-upd-err")
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("NAT error"))
+        result = await opn_update_nat_rule(mock_ctx_writes, uuid="nat-uuid-1", target_ip="10.0.0.1")
+        assert "error" in result
+        assert result["revision"] == "rev-nat-upd-err"
+
+
+class TestOpnDeleteNatRule:
+    """Tests for opn_delete_nat_rule."""
+
+    async def test_deletes_with_savepoint(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-del-1")
+        mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        result = await opn_delete_nat_rule(mock_ctx_writes, uuid="nat-to-delete")
+        mock_api_writes.post.assert_called_once_with("nat.dnat.del_rule", path_suffix="nat-to-delete")
+        mock_savepoint_mgr.apply.assert_called_once_with("rev-nat-del-1")
+        assert result["revision"] == "rev-nat-del-1"
+        assert result["result"] == "deleted"
+
+    async def test_returns_revision_for_confirmation(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-del-2")
+        mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
+        mock_savepoint_mgr.apply = AsyncMock(return_value={})
+        result = await opn_delete_nat_rule(mock_ctx_writes, uuid="nat-uuid-2")
+        assert result["revision"] == "rev-nat-del-2"
+        assert result["uuid"] == "nat-uuid-2"
+
+    async def test_fails_when_writes_disabled(self, mock_ctx_no_writes):
+        with pytest.raises(WriteDisabledError):
+            await opn_delete_nat_rule(mock_ctx_no_writes, uuid="nat-uuid-1")
+
+    async def test_returns_error_on_api_failure(self, mock_api_writes, mock_savepoint_mgr, mock_ctx_writes):
+        mock_savepoint_mgr.create = AsyncMock(return_value="rev-nat-del-err")
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("NAT rule not found"))
+        result = await opn_delete_nat_rule(mock_ctx_writes, uuid="bad-nat-uuid")
+        assert "error" in result
+        assert result["revision"] == "rev-nat-del-err"

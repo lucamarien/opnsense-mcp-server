@@ -150,6 +150,94 @@ async def opn_add_dns_override(
     }
 
 
+@mcp.tool()
+async def opn_update_dns_override(
+    ctx: Context,
+    uuid: str,
+    hostname: str | None = None,
+    domain: str | None = None,
+    server: str | None = None,
+    description: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update an Unbound DNS host override by UUID and apply immediately.
+
+    Use this when you need to change the hostname, domain, IP address, or other
+    properties of a DNS override. Only the parameters you provide are changed;
+    all other settings are preserved.
+
+    Changes are applied immediately (Unbound is reconfigured automatically).
+    DNS overrides cannot be auto-reverted — verify settings before calling.
+    Use opn_list_dns_overrides first to find the UUID.
+
+    Parameters:
+    - uuid: override UUID (from opn_list_dns_overrides)
+    - hostname: new hostname part (e.g. 'myserver')
+    - domain: new domain part (e.g. 'local.lan')
+    - server: new IP address (IPv4 or IPv6)
+    - description: new description
+    - enabled: enable/disable the override
+
+    Returns: dict with 'result' (str), 'uuid' (str), and 'applied' status.
+    """
+    if hostname is not None and not _HOSTNAME_RE.match(hostname):
+        return {"error": f"Invalid hostname '{hostname}'. Must be alphanumeric with hyphens."}
+    if domain is not None and not _DOMAIN_RE.match(domain):
+        return {"error": f"Invalid domain '{domain}'. Must be a valid domain name."}
+    if server is not None and not _IP_RE.match(server):
+        return {"error": f"Invalid server IP '{server}'. Must be an IPv4 or IPv6 address."}
+
+    api = get_api(ctx)
+    api.require_writes()
+
+    host: dict[str, str] = {}
+    if hostname is not None:
+        host["hostname"] = hostname
+    if domain is not None:
+        host["domain"] = domain
+    if server is not None:
+        host["server"] = server
+    if description is not None:
+        host["description"] = description
+    if enabled is not None:
+        host["enabled"] = "1" if enabled else "0"
+
+    result = await api.post("unbound.set_host_override", {"host": host}, path_suffix=uuid)
+    reconfigure = await api.post("unbound.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "applied": reconfigure.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_delete_dns_override(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete an Unbound DNS host override by UUID and apply immediately.
+
+    The deletion is applied immediately (Unbound is reconfigured automatically).
+    DNS changes cannot be auto-reverted — verify the UUID before calling.
+    Use opn_list_dns_overrides first to find the UUID.
+    Returns: dict with 'result' (str), 'uuid' (str), and 'applied' status.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("unbound.del_host_override", path_suffix=uuid)
+    reconfigure = await api.post("unbound.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "applied": reconfigure.get("status", "unknown"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # DNSBL (DNS Blocklist) tools
 # ---------------------------------------------------------------------------

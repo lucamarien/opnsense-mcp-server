@@ -9,11 +9,13 @@ import pytest
 from opnsense_mcp.api_client import WriteDisabledError
 from opnsense_mcp.tools.dhcp import (
     opn_add_dnsmasq_range,
+    opn_delete_dnsmasq_range,
     opn_list_dhcp_leases,
     opn_list_dnsmasq_leases,
     opn_list_dnsmasq_ranges,
     opn_list_kea_leases,
     opn_reconfigure_dnsmasq,
+    opn_update_dnsmasq_range,
 )
 
 
@@ -240,3 +242,104 @@ class TestOpnReconfigureDnsmasq:
         mock_api_writes.post = AsyncMock(return_value={})
         result = await opn_reconfigure_dnsmasq(mock_ctx_writes)
         assert result["status"] == "unknown"
+
+
+class TestOpnUpdateDnsmasqRange:
+    """Tests for opn_update_dnsmasq_range."""
+
+    async def test_updates_with_partial_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        result = await opn_update_dnsmasq_range(
+            mock_ctx_writes,
+            uuid="range-uuid-1",
+            start_addr="192.168.1.50",
+        )
+        set_call = mock_api_writes.post.call_args_list[0]
+        assert set_call[0][0] == "dnsmasq.settings.set_range"
+        assert set_call[0][1] == {"range": {"start_addr": "192.168.1.50"}}
+        assert set_call[1]["path_suffix"] == "range-uuid-1"
+        assert result["result"] == "saved"
+        assert result["uuid"] == "range-uuid-1"
+
+    async def test_updates_multiple_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_dnsmasq_range(
+            mock_ctx_writes,
+            uuid="range-uuid-1",
+            interface="opt1",
+            start_addr="10.0.0.100",
+            end_addr="10.0.0.200",
+            lease_time="12h",
+            enabled=False,
+        )
+        range_cfg = mock_api_writes.post.call_args_list[0][0][1]["range"]
+        assert range_cfg["interface"] == "opt1"
+        assert range_cfg["start_addr"] == "10.0.0.100"
+        assert range_cfg["end_addr"] == "10.0.0.200"
+        assert range_cfg["lease_time"] == "12h"
+        assert range_cfg["enabled"] == "0"
+
+    async def test_converts_enabled_bool(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_dnsmasq_range(mock_ctx_writes, uuid="range-uuid-1", enabled=True)
+        range_cfg = mock_api_writes.post.call_args_list[0][0][1]["range"]
+        assert range_cfg["enabled"] == "1"
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_dnsmasq_range(mock_ctx, uuid="range-uuid-1", start_addr="10.0.0.1")
+
+    async def test_reconfigures_dnsmasq(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        await opn_update_dnsmasq_range(mock_ctx_writes, uuid="range-uuid-1", start_addr="10.0.0.1")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dnsmasq.service.reconfigure"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved"}, {"status": "ok"}],
+        )
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_update_dnsmasq_range(mock_ctx_writes, uuid="range-uuid-1", start_addr="10.0.0.1")
+        assert cache._stale
+
+
+class TestOpnDeleteDnsmasqRange:
+    """Tests for opn_delete_dnsmasq_range."""
+
+    async def test_deletes_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        result = await opn_delete_dnsmasq_range(mock_ctx_writes, uuid="range-to-delete")
+        mock_api_writes.post.assert_any_call("dnsmasq.settings.del_range", path_suffix="range-to-delete")
+        assert result["result"] == "deleted"
+        assert result["uuid"] == "range-to-delete"
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_delete_dnsmasq_range(mock_ctx, uuid="range-uuid-1")
+
+    async def test_reconfigures_dnsmasq(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        await opn_delete_dnsmasq_range(mock_ctx_writes, uuid="range-uuid-1")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dnsmasq.service.reconfigure"
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "deleted"}, {"status": "ok"}],
+        )
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_delete_dnsmasq_range(mock_ctx_writes, uuid="range-uuid-1")
+        assert cache._stale

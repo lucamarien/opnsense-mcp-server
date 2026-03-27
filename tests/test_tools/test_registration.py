@@ -19,6 +19,7 @@ class TestToolRegistration:
             "opn_download_config",
             "opn_scan_config",
             "opn_get_config_section",
+            "opn_mcp_info",
             # Network
             "opn_interface_stats",
             "opn_arp_table",
@@ -41,12 +42,20 @@ class TestToolRegistration:
             "opn_delete_firewall_category",
             "opn_set_rule_categories",
             "opn_add_icmpv6_rules",
+            "opn_update_alias",
+            "opn_delete_alias",
+            "opn_toggle_alias",
+            "opn_update_firewall_rule",
+            "opn_update_nat_rule",
+            "opn_delete_nat_rule",
             # DNS
             "opn_list_dns_overrides",
             "opn_list_dns_forwards",
             "opn_dns_stats",
             "opn_reconfigure_unbound",
             "opn_add_dns_override",
+            "opn_update_dns_override",
+            "opn_delete_dns_override",
             # DNSBL
             "opn_list_dnsbl",
             "opn_get_dnsbl",
@@ -61,6 +70,8 @@ class TestToolRegistration:
             "opn_list_dnsmasq_ranges",
             "opn_add_dnsmasq_range",
             "opn_reconfigure_dnsmasq",
+            "opn_update_dnsmasq_range",
+            "opn_delete_dnsmasq_range",
             # VPN
             "opn_wireguard_status",
             "opn_ipsec_status",
@@ -82,6 +93,10 @@ class TestToolRegistration:
             "opn_list_ddns_accounts",
             "opn_add_ddns_account",
             "opn_reconfigure_ddclient",
+            "opn_update_ddns_account",
+            "opn_delete_ddns_account",
+            "opn_mdns_repeater_status",
+            "opn_configure_mdns_repeater",
             # Security
             "opn_security_audit",
             # Diagnostics
@@ -96,4 +111,4 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 69, f"Expected 69 tools, got {len(tools)}"
+        assert len(tools) == 81, f"Expected 81 tools, got {len(tools)}"

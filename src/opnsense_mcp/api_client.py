@@ -104,8 +104,15 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "firewall/filter/toggleRule",
         "firewall/filter/toggle_rule",
     ),
-    # Firewall alias write
+    # Firewall alias CRUD
     "firewall.alias.add": ("firewall/alias/addItem", "firewall/alias/add_item"),
+    "firewall.alias.get": ("firewall/alias/getItem", "firewall/alias/get_item"),
+    "firewall.alias.set": ("firewall/alias/setItem", "firewall/alias/set_item"),
+    "firewall.alias.del": ("firewall/alias/delItem", "firewall/alias/del_item"),
+    "firewall.alias.toggle": (
+        "firewall/alias/toggleItem",
+        "firewall/alias/toggle_item",
+    ),
     # Firewall categories
     "firewall.category.search": (
         "firewall/category/searchItem",
@@ -193,6 +200,14 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "firewall/d_nat/addRule",
         "firewall/d_nat/add_rule",
     ),
+    "nat.dnat.set_rule": (
+        "firewall/d_nat/setRule",
+        "firewall/d_nat/set_rule",
+    ),
+    "nat.dnat.del_rule": (
+        "firewall/d_nat/delRule",
+        "firewall/d_nat/del_rule",
+    ),
     # IPsec VPN
     "ipsec.sessions.phase1": (
         "ipsec/sessions/searchPhase1",
@@ -217,6 +232,10 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
     "unbound.add_host_override": (
         "unbound/settings/addHostOverride",
         "unbound/settings/add_host_override",
+    ),
+    "unbound.set_host_override": (
+        "unbound/settings/setHostOverride",
+        "unbound/settings/set_host_override",
     ),
     "unbound.del_host_override": (
         "unbound/settings/delHostOverride",
@@ -313,6 +332,14 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "dyndns/accounts/addItem",
         "dyndns/accounts/add_item",
     ),
+    "dyndns.accounts.set": (
+        "dyndns/accounts/setItem",
+        "dyndns/accounts/set_item",
+    ),
+    "dyndns.accounts.del": (
+        "dyndns/accounts/delItem",
+        "dyndns/accounts/del_item",
+    ),
     "dyndns.service.reconfigure": (
         "dyndns/service/reconfigure",
         "dyndns/service/reconfigure",
@@ -325,6 +352,14 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
     "dnsmasq.settings.add_range": (
         "dnsmasq/settings/addRange",
         "dnsmasq/settings/add_range",
+    ),
+    "dnsmasq.settings.set_range": (
+        "dnsmasq/settings/setRange",
+        "dnsmasq/settings/set_range",
+    ),
+    "dnsmasq.settings.del_range": (
+        "dnsmasq/settings/delRange",
+        "dnsmasq/settings/del_range",
     ),
     "dnsmasq.service.reconfigure": (
         "dnsmasq/service/reconfigure",

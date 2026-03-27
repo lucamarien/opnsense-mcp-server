@@ -170,6 +170,98 @@ async def opn_add_dnsmasq_range(
 
 
 @mcp.tool()
+async def opn_update_dnsmasq_range(
+    ctx: Context,
+    uuid: str,
+    interface: str | None = None,
+    start_addr: str | None = None,
+    end_addr: str | None = None,
+    prefix_len: str | None = None,
+    ra_mode: str | None = None,
+    lease_time: str | None = None,
+    description: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update a dnsmasq DHCP range by UUID and apply the configuration.
+
+    Use this when you need to change the address range, lease time, RA settings,
+    or other properties. Only the parameters you provide are changed; all other
+    settings are preserved.
+
+    After update, the dnsmasq service is automatically reconfigured. Changes
+    take effect immediately.
+    Use opn_list_dnsmasq_ranges first to find the UUID.
+
+    Parameters:
+    - uuid: range UUID (from opn_list_dnsmasq_ranges)
+    - interface: network interface name (e.g. 'lan', 'opt1')
+    - start_addr: start of address range
+    - end_addr: end of address range
+    - prefix_len: IPv6 prefix length (e.g. '64')
+    - ra_mode: Router Advertisement mode ('slaac', 'ra-stateless', 'ra-only')
+    - lease_time: lease duration (e.g. '24h', '1h')
+    - description: human-readable description
+    - enabled: enable/disable the range
+
+    Returns: dict with 'result' (str), 'uuid' (str), and 'reconfigure_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+
+    range_config: dict[str, str] = {}
+    if interface is not None:
+        range_config["interface"] = interface
+    if start_addr is not None:
+        range_config["start_addr"] = start_addr
+    if end_addr is not None:
+        range_config["end_addr"] = end_addr
+    if prefix_len is not None:
+        range_config["prefix_len"] = prefix_len
+    if ra_mode is not None:
+        range_config["ra_mode"] = ra_mode
+    if lease_time is not None:
+        range_config["lease_time"] = lease_time
+    if description is not None:
+        range_config["description"] = description
+    if enabled is not None:
+        range_config["enabled"] = "1" if enabled else "0"
+
+    result = await api.post("dnsmasq.settings.set_range", {"range": range_config}, path_suffix=uuid)
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_delete_dnsmasq_range(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete a dnsmasq DHCP range by UUID and apply the configuration.
+
+    The deletion is applied immediately (dnsmasq is reconfigured automatically).
+    Use opn_list_dnsmasq_ranges first to find the UUID.
+    Returns: dict with 'result' (str), 'uuid' (str), and 'reconfigure_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("dnsmasq.settings.del_range", path_suffix=uuid)
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
 async def opn_reconfigure_dnsmasq(ctx: Context) -> dict[str, Any]:
     """Apply pending dnsmasq DNS/DHCP configuration changes.
 

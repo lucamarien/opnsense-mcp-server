@@ -297,6 +297,133 @@ async def opn_delete_firewall_rule(
 
 
 @mcp.tool()
+async def opn_update_firewall_rule(
+    ctx: Context,
+    uuid: str,
+    action: str | None = None,
+    direction: str | None = None,
+    interface: str | None = None,
+    ip_protocol: str | None = None,
+    protocol: str | None = None,
+    source_net: str | None = None,
+    source_not: bool | None = None,
+    source_port: str | None = None,
+    destination_net: str | None = None,
+    destination_not: bool | None = None,
+    destination_port: str | None = None,
+    gateway: str | None = None,
+    log: bool | None = None,
+    quick: bool | None = None,
+    sequence: int | None = None,
+    categories: str | None = None,
+    description: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update an existing MVC firewall rule by UUID with savepoint protection.
+
+    Use this when you need to modify a firewall rule's action, source/destination,
+    protocol, ports, or other properties. Only the parameters you provide are
+    changed; all other settings are preserved.
+
+    Changes auto-revert in 60 seconds unless confirmed with opn_confirm_changes.
+    Use opn_list_firewall_rules first to find the UUID.
+
+    Parameters:
+    - uuid: rule UUID (from opn_list_firewall_rules)
+    - action: 'pass', 'block', or 'reject'
+    - direction: 'in' or 'out'
+    - interface: interface name (e.g. 'lan', 'wan', 'opt1')
+    - ip_protocol: 'inet' (IPv4), 'inet6' (IPv6), or 'inet46' (dual-stack)
+    - protocol: 'any', 'TCP', 'UDP', 'TCP/UDP', 'ICMP', etc.
+    - source_net: source address/network or 'any'
+    - source_not: invert source match
+    - source_port: source port number or range
+    - destination_net: destination address/network or 'any'
+    - destination_not: invert destination match
+    - destination_port: port number or range
+    - gateway: force traffic via specific gateway, or empty to clear
+    - log: enable/disable logging
+    - quick: first-match wins (True) or last-match-wins (False)
+    - sequence: rule ordering within priority group
+    - categories: comma-separated category UUIDs
+    - description: human-readable rule description
+    - enabled: enable/disable the rule
+
+    Returns: dict with 'revision' (str), 'uuid' (str), and 'result' (str).
+    """
+    if action is not None and action not in _VALID_ACTIONS:
+        return {"error": f"Invalid action '{action}'. Must be one of: pass, block, reject"}
+    if direction is not None and direction not in _VALID_DIRECTIONS:
+        return {"error": f"Invalid direction '{direction}'. Must be one of: in, out"}
+    if ip_protocol is not None and ip_protocol not in _VALID_IP_PROTOCOLS:
+        return {
+            "error": f"Invalid ip_protocol '{ip_protocol}'. Must be 'inet', 'inet6', or 'inet46'.",
+        }
+
+    api = get_api(ctx)
+    mgr = get_savepoint_manager(ctx)
+    revision = await mgr.create()
+
+    rule: dict[str, str] = {}
+    if action is not None:
+        rule["action"] = action
+    if direction is not None:
+        rule["direction"] = direction
+    if interface is not None:
+        rule["interface"] = interface
+    if ip_protocol is not None:
+        rule["ipprotocol"] = ip_protocol
+    if protocol is not None:
+        rule["protocol"] = protocol
+    if source_net is not None:
+        rule["source_net"] = source_net
+    if source_not is not None:
+        rule["source_not"] = "1" if source_not else "0"
+    if source_port is not None:
+        rule["source_port"] = source_port
+    if destination_net is not None:
+        rule["destination_net"] = destination_net
+    if destination_not is not None:
+        rule["destination_not"] = "1" if destination_not else "0"
+    if destination_port is not None:
+        rule["destination_port"] = destination_port
+    if gateway is not None:
+        rule["gateway"] = gateway
+    if log is not None:
+        rule["log"] = "1" if log else "0"
+    if quick is not None:
+        rule["quick"] = "1" if quick else "0"
+    if sequence is not None:
+        rule["sequence"] = str(sequence)
+    if categories is not None:
+        rule["categories"] = categories
+    if description is not None:
+        rule["description"] = description
+    if enabled is not None:
+        rule["enabled"] = "1" if enabled else "0"
+
+    try:
+        result = await api.post("firewall.set_rule", {"rule": rule}, path_suffix=uuid)
+    except OPNsenseAPIError as exc:
+        return {
+            "error": str(exc),
+            "revision": revision,
+            "message": "Savepoint created but rule update failed. Changes will auto-revert.",
+        }
+
+    await mgr.apply(revision)
+    get_config_cache(ctx).invalidate()
+    return {
+        "revision": revision,
+        "uuid": uuid,
+        "result": result.get("result", ""),
+        "message": (
+            f"Rule updated. Call opn_confirm_changes with revision '{revision}' to make permanent (60s auto-revert)."
+        ),
+    }
+
+
+@mcp.tool()
 async def opn_add_alias(
     ctx: Context,
     name: str,
@@ -351,6 +478,124 @@ async def opn_add_alias(
         "result": result.get("result", ""),
         "uuid": result.get("uuid", ""),
         "name": name,
+    }
+
+
+@mcp.tool()
+async def opn_update_alias(
+    ctx: Context,
+    uuid: str,
+    name: str | None = None,
+    content: str | None = None,
+    description: str | None = None,
+    alias_type: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update an existing firewall alias by UUID (read-modify-write).
+
+    Use this when you need to rename an alias, change its content (IPs, networks,
+    ports), modify its description, or change its type. Only the parameters you
+    provide are changed; all other settings are preserved.
+
+    This does NOT require savepoint protection — aliases are metadata definitions
+    that only affect traffic when referenced by a firewall rule.
+
+    Use opn_list_firewall_aliases first to find the UUID.
+
+    Parameters:
+    - uuid: alias UUID (from opn_list_firewall_aliases)
+    - name: new alias name (alphanumeric and underscores only)
+    - content: new alias entries separated by newlines
+    - description: new description
+    - alias_type: new type ('host', 'network', 'port', 'urltable', 'geoip')
+    - enabled: enable/disable the alias
+
+    Returns: dict with 'result' (str) and 'uuid' (str).
+    """
+    if name is not None and not _ALIAS_NAME_RE.match(name):
+        return {
+            "error": f"Invalid alias name '{name}'. Must contain only letters, numbers, and underscores.",
+        }
+    if alias_type is not None and alias_type not in _VALID_ALIAS_TYPES:
+        return {
+            "error": f"Invalid alias_type '{alias_type}'. Must be one of: host, network, port, urltable, geoip",
+        }
+
+    api = get_api(ctx)
+    api.require_writes()
+
+    # Read current alias state
+    raw = await api.get("firewall.alias.get", path_suffix=uuid)
+    current = raw.get("alias", {})
+
+    # Merge only provided fields
+    if name is not None:
+        current["name"] = name
+    if content is not None:
+        current["content"] = content
+    if description is not None:
+        current["description"] = description
+    if alias_type is not None:
+        current["type"] = alias_type
+    if enabled is not None:
+        current["enabled"] = "1" if enabled else "0"
+
+    result = await api.post("firewall.alias.set", {"alias": current}, path_suffix=uuid)
+    get_config_cache(ctx).invalidate()
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+    }
+
+
+@mcp.tool()
+async def opn_delete_alias(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete a firewall alias by UUID.
+
+    IMPORTANT: Check if any firewall rules reference this alias BEFORE deleting.
+    Deleting an alias that is referenced by rules may cause those rules to stop
+    matching traffic. Use opn_list_firewall_rules to check for references first.
+
+    This does NOT use savepoint protection — aliases are metadata definitions.
+    The deletion takes effect immediately.
+
+    Use opn_list_firewall_aliases first to find the UUID.
+    Returns: dict with 'result' (str) and 'uuid' (str).
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("firewall.alias.del", path_suffix=uuid)
+    get_config_cache(ctx).invalidate()
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+    }
+
+
+@mcp.tool()
+async def opn_toggle_alias(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Toggle a firewall alias's enabled/disabled state.
+
+    Use this when you need to temporarily disable an alias without deleting it,
+    or re-enable a previously disabled alias. The toggle flips the current state.
+
+    This does NOT use savepoint protection — aliases are metadata definitions.
+    Use opn_list_firewall_aliases first to find the UUID.
+    Returns: dict with 'result' (str) and 'uuid' (str).
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("firewall.alias.toggle", path_suffix=uuid)
+    get_config_cache(ctx).invalidate()
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
     }
 
 
@@ -445,6 +690,122 @@ async def opn_add_nat_rule(
         "result": result.get("result", ""),
         "message": (
             f"NAT rule created. Call opn_confirm_changes with revision '{revision}' "
+            "to make permanent (60s auto-revert)."
+        ),
+    }
+
+
+@mcp.tool()
+async def opn_update_nat_rule(
+    ctx: Context,
+    uuid: str,
+    interface: str | None = None,
+    protocol: str | None = None,
+    destination_port: str | None = None,
+    target_ip: str | None = None,
+    target_port: str | None = None,
+    description: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update an existing NAT port forwarding rule by UUID with savepoint protection.
+
+    Use this when you need to change the target IP, port, or other properties
+    of a NAT rule. Only the parameters you provide are changed; all other
+    settings are preserved.
+
+    Changes auto-revert in 60 seconds unless confirmed with opn_confirm_changes.
+    Use opn_list_nat_rules first to find the UUID.
+
+    Parameters:
+    - uuid: NAT rule UUID (from opn_list_nat_rules)
+    - interface: source interface (e.g. 'wan', 'opt1')
+    - protocol: 'TCP', 'UDP', or 'TCP/UDP'
+    - destination_port: external port to forward (e.g. '8080', '3000-3010')
+    - target_ip: internal IP address to forward to
+    - target_port: internal port
+    - description: human-readable description
+    - enabled: enable/disable the rule
+
+    Returns: dict with 'revision' (str), 'uuid' (str), and 'result' (str).
+    """
+    if protocol is not None and protocol not in _VALID_NAT_PROTOCOLS:
+        return {
+            "error": f"Invalid protocol '{protocol}'. Must be one of: TCP, UDP, TCP/UDP",
+        }
+
+    api = get_api(ctx)
+    mgr = get_savepoint_manager(ctx)
+    revision = await mgr.create()
+
+    rule: dict[str, str] = {}
+    if interface is not None:
+        rule["interface"] = interface
+    if protocol is not None:
+        rule["protocol"] = protocol
+    if destination_port is not None:
+        rule["destination_port"] = destination_port
+    if target_ip is not None:
+        rule["target_ip"] = target_ip
+    if target_port is not None:
+        rule["target_port"] = target_port
+    if description is not None:
+        rule["description"] = description
+    if enabled is not None:
+        rule["enabled"] = "1" if enabled else "0"
+
+    try:
+        result = await api.post("nat.dnat.set_rule", {"rule": rule}, path_suffix=uuid)
+    except OPNsenseAPIError as exc:
+        return {
+            "error": str(exc),
+            "revision": revision,
+            "message": "Savepoint created but NAT rule update failed. Changes will auto-revert.",
+        }
+
+    await mgr.apply(revision)
+    get_config_cache(ctx).invalidate()
+    return {
+        "revision": revision,
+        "uuid": uuid,
+        "result": result.get("result", ""),
+        "message": (
+            f"NAT rule updated. Call opn_confirm_changes with revision '{revision}' "
+            "to make permanent (60s auto-revert)."
+        ),
+    }
+
+
+@mcp.tool()
+async def opn_delete_nat_rule(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete a NAT port forwarding rule by UUID with savepoint protection.
+
+    Use this when you need to remove an existing NAT rule. Changes auto-revert
+    in 60 seconds unless confirmed with opn_confirm_changes.
+    Use opn_list_nat_rules first to find the UUID of the rule to delete.
+    Returns: dict with 'revision' (str) for confirming and 'result' (str).
+    """
+    api = get_api(ctx)
+    mgr = get_savepoint_manager(ctx)
+    revision = await mgr.create()
+    try:
+        result = await api.post("nat.dnat.del_rule", path_suffix=uuid)
+    except OPNsenseAPIError as exc:
+        return {
+            "error": str(exc),
+            "revision": revision,
+            "message": "Savepoint created but NAT rule deletion failed. Changes will auto-revert.",
+        }
+    await mgr.apply(revision)
+    get_config_cache(ctx).invalidate()
+    return {
+        "revision": revision,
+        "uuid": uuid,
+        "result": result.get("result", ""),
+        "message": (
+            f"NAT rule deleted. Call opn_confirm_changes with revision '{revision}' "
             "to make permanent (60s auto-revert)."
         ),
     }
