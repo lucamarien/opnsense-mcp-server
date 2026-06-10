@@ -437,6 +437,21 @@ class OPNsenseAPI:
         # 'camel'/'snake' force the endpoint style and skip version detection
         self._style_forced: bool = config.api_style in ("camel", "snake")
 
+    @property
+    def config(self) -> OPNsenseConfig:
+        """The loaded configuration (read-only)."""
+        return self._config
+
+    @property
+    def detected_version(self) -> tuple[int, int] | None:
+        """Detected OPNsense version, or None before detection / when forced."""
+        return self._detected_version
+
+    @property
+    def use_snake_case(self) -> bool:
+        """True when snake_case endpoint naming is in effect."""
+        return self._use_snake_case
+
     def require_writes(self) -> None:
         """Raise if write operations are disabled.
 

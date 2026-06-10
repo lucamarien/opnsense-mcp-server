@@ -8,7 +8,7 @@ from typing import Any
 from fastmcp import Context
 
 from opnsense_mcp import __version__
-from opnsense_mcp.config_cache import SENSITIVE_TAGS
+from opnsense_mcp.config_cache import is_sensitive_tag
 from opnsense_mcp.server import get_api, get_config_cache, mcp
 
 
@@ -21,7 +21,7 @@ def _strip_sensitive_data(xml_text: str) -> str:
         return xml_text
 
     for elem in root.iter():
-        if elem.tag.lower() in SENSITIVE_TAGS and elem.text:
+        if is_sensitive_tag(elem.tag) and elem.text:
             elem.text = "[REDACTED]"
 
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
