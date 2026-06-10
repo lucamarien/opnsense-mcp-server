@@ -90,7 +90,11 @@ def get_savepoint_manager(ctx: Context) -> SavepointManager:
     return mgr
 
 
-# Import tool modules to register their @mcp.tool() decorators.
+# Import tool/prompt/resource modules to register their decorators.
+from opnsense_mcp import (  # noqa: E402
+    prompts,  # noqa: F401
+    resources,  # noqa: F401
+)
 from opnsense_mcp.tools import (  # noqa: E402
     dhcp,  # noqa: F401
     diagnostics,  # noqa: F401
