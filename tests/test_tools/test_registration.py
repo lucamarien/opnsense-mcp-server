@@ -72,12 +72,9 @@ class TestToolRegistration:
             "opn_list_acme_certs",
             "opn_list_cron_jobs",
             "opn_crowdsec_status",
-            "opn_crowdsec_alerts",
             "opn_list_ddns_accounts",
-            "opn_add_ddns_account",
+            "opn_manage_ddns_account",
             "opn_reconfigure_ddclient",
-            "opn_update_ddns_account",
-            "opn_delete_ddns_account",
             "opn_mdns_repeater_status",
             "opn_configure_mdns_repeater",
             # Security
@@ -94,4 +91,4 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 64, f"Expected 64 tools, got {len(tools)}"
+        assert len(tools) == 61, f"Expected 61 tools, got {len(tools)}"

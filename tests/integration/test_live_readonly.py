@@ -74,7 +74,6 @@ from opnsense_mcp.tools.network import (
 )
 from opnsense_mcp.tools.security import opn_security_audit
 from opnsense_mcp.tools.services import (
-    opn_crowdsec_alerts,
     opn_crowdsec_status,
     opn_list_acme_certs,
     opn_list_cron_jobs,
@@ -253,7 +252,6 @@ async def main() -> int:
         ("opn_haproxy_status", opn_haproxy_status(ctx)),
         ("opn_list_acme_certs", opn_list_acme_certs(ctx)),
         ("opn_crowdsec_status", opn_crowdsec_status(ctx)),
-        ("opn_crowdsec_alerts", opn_crowdsec_alerts(ctx)),
         ("opn_list_dhcp_leases[isc]", opn_list_dhcp_leases(ctx, backend="isc")),
         ("opn_list_dhcp_leases[kea]", opn_list_dhcp_leases(ctx, backend="kea")),
         ("opn_ipsec_status", opn_ipsec_status(ctx)),

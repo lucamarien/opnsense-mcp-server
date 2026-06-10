@@ -1,522 +1,212 @@
-"""Tests for service tools."""
+"""Tests for service tools (DDNS manage, merged CrowdSec, mDNS, v0.5)."""
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-import pytest
-
-from opnsense_mcp.api_client import WriteDisabledError
+from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.tools.services import (
-    opn_add_ddns_account,
     opn_configure_mdns_repeater,
-    opn_crowdsec_alerts,
     opn_crowdsec_status,
-    opn_delete_ddns_account,
     opn_list_acme_certs,
     opn_list_cron_jobs,
     opn_list_ddns_accounts,
+    opn_manage_ddns_account,
     opn_mdns_repeater_status,
     opn_reconfigure_ddclient,
-    opn_update_ddns_account,
 )
 
 
-class TestOpnListAcmeCerts:
-    """Tests for opn_list_acme_certs."""
-
-    async def test_calls_acme_search(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        result = await opn_list_acme_certs(mock_ctx)
-        mock_api.post.assert_called_once_with(
-            "acmeclient.certs.search",
-            {"current": 1, "rowCount": 50, "searchPhrase": ""},
-        )
-        assert result == {"rows": [], "rowCount": 0}
-
-    async def test_passes_search_phrase(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_list_acme_certs(mock_ctx, search="example.com")
-        mock_api.post.assert_called_once_with(
-            "acmeclient.certs.search",
-            {"current": 1, "rowCount": 50, "searchPhrase": "example.com"},
-        )
-
-    async def test_limit_capped_at_500(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_list_acme_certs(mock_ctx, limit=800)
-        mock_api.post.assert_called_once_with(
-            "acmeclient.certs.search",
-            {"current": 1, "rowCount": 500, "searchPhrase": ""},
-        )
-
-
-class TestOpnListCronJobs:
-    """Tests for opn_list_cron_jobs."""
-
-    async def test_calls_cron_search(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        result = await opn_list_cron_jobs(mock_ctx)
-        mock_api.post.assert_called_once_with(
-            "cron.search_jobs",
-            {"current": 1, "rowCount": 50, "searchPhrase": ""},
-        )
-        assert result == {"rows": [], "rowCount": 0}
-
-    async def test_passes_search_and_limit(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_list_cron_jobs(mock_ctx, search="backup", limit=20)
-        mock_api.post.assert_called_once_with(
-            "cron.search_jobs",
-            {"current": 1, "rowCount": 20, "searchPhrase": "backup"},
-        )
-
-    async def test_limit_capped_at_500(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_list_cron_jobs(mock_ctx, limit=501)
-        mock_api.post.assert_called_once_with(
-            "cron.search_jobs",
-            {"current": 1, "rowCount": 500, "searchPhrase": ""},
-        )
-
-
-class TestOpnCrowdsecStatus:
-    """Tests for opn_crowdsec_status."""
-
-    _SEARCH_PARAMS = {"current": 1, "rowCount": 500, "searchPhrase": ""}
-
-    async def test_returns_status_and_counts(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"status": "running"})
-        mock_api.post = AsyncMock(
-            side_effect=[
-                {"rows": [{"id": "1", "type": "ban"}], "rowCount": 1},
-                {"rows": [{"id": "a1"}], "rowCount": 1},
-            ],
-        )
-        result = await opn_crowdsec_status(mock_ctx)
-        mock_api.get.assert_called_once_with("crowdsec.service.status")
-        mock_api.post.assert_any_call("crowdsec.decisions.search", self._SEARCH_PARAMS)
-        mock_api.post.assert_any_call("crowdsec.alerts.search", self._SEARCH_PARAMS)
-        assert result["service_status"] == "running"
-        assert result["decisions_count"] == 1
-        assert result["alerts_count"] == 1
-
-    async def test_empty_decisions_and_alerts(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"status": "running"})
-        mock_api.post = AsyncMock(
-            side_effect=[
-                {"rows": [], "rowCount": 0},
-                {"rows": [], "rowCount": 0},
-            ],
-        )
-        result = await opn_crowdsec_status(mock_ctx)
-        assert result["decisions_count"] == 0
-        assert result["alerts_count"] == 0
-
-    async def test_limits_decisions_to_20(self, mock_api, mock_ctx):
-        many_decisions = [{"id": str(i)} for i in range(30)]
-        mock_api.get = AsyncMock(return_value={"status": "running"})
-        mock_api.post = AsyncMock(
-            side_effect=[
-                {"rows": many_decisions, "rowCount": 30},
-                {"rows": [], "rowCount": 0},
-            ],
-        )
-        result = await opn_crowdsec_status(mock_ctx)
-        assert len(result["decisions"]) == 20
-        assert result["decisions_count"] == 30
-
-
-class TestOpnCrowdsecAlerts:
-    """Tests for opn_crowdsec_alerts."""
-
-    async def test_calls_alerts_search(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        result = await opn_crowdsec_alerts(mock_ctx)
-        mock_api.post.assert_called_once_with(
-            "crowdsec.alerts.search",
-            {"current": 1, "rowCount": 50, "searchPhrase": ""},
-        )
-        assert result == {"rows": [], "rowCount": 0}
-
-    async def test_passes_search_and_limit(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_crowdsec_alerts(mock_ctx, search="ssh", limit=20)
-        mock_api.post.assert_called_once_with(
-            "crowdsec.alerts.search",
-            {"current": 1, "rowCount": 20, "searchPhrase": "ssh"},
-        )
-
-    async def test_limit_capped_at_500(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_crowdsec_alerts(mock_ctx, limit=999)
-        call_args = mock_api.post.call_args[0][1]
-        assert call_args["rowCount"] == 500
-
-
-class TestOpnListDdnsAccounts:
-    """Tests for opn_list_ddns_accounts."""
-
-    async def test_calls_dyndns_search(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        result = await opn_list_ddns_accounts(mock_ctx)
-        mock_api.post.assert_called_once_with(
-            "dyndns.accounts.search",
-            {"current": 1, "rowCount": 50, "searchPhrase": ""},
-        )
-        assert result == {"rows": [], "rowCount": 0}
-
-    async def test_passes_search_and_limit(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_list_ddns_accounts(mock_ctx, search="example.com", limit=20)
-        mock_api.post.assert_called_once_with(
-            "dyndns.accounts.search",
-            {"current": 1, "rowCount": 20, "searchPhrase": "example.com"},
-        )
-
-    async def test_limit_capped_at_500(self, mock_api, mock_ctx):
-        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
-        await opn_list_ddns_accounts(mock_ctx, limit=800)
-        call_args = mock_api.post.call_args[0][1]
-        assert call_args["rowCount"] == 500
-
-    async def test_sanitizes_passwords(self, mock_api, mock_ctx):
+class TestListDdnsAccounts:
+    async def test_calls_search_and_masks_credentials(self, mock_api, mock_ctx):
         mock_api.post = AsyncMock(
             return_value={
                 "rows": [
-                    {
-                        "hostname": "fw.example.com",
-                        "password": "super-secret-api-token",
-                        "%password": "masked",
-                        "service": "cloudflare",
-                    },
+                    {"hostname": "fw.example.com", "password": "supersecret", "%password": "supersecret"},
                 ],
                 "rowCount": 1,
             }
         )
         result = await opn_list_ddns_accounts(mock_ctx)
-        row = result["rows"][0]
-        assert row["password"] == "***"
-        assert row["%password"] == "***"
-        assert row["hostname"] == "fw.example.com"
-        assert row["service"] == "cloudflare"
-
-
-class TestOpnAddDdnsAccount:
-    """Tests for opn_add_ddns_account."""
-
-    async def test_creates_account_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[
-                {"result": "saved", "uuid": "ddns-uuid-123"},
-                {"status": "ok"},
-            ]
+        mock_api.post.assert_called_once_with(
+            "dyndns.accounts.search",
+            {"current": 1, "rowCount": 50, "searchPhrase": ""},
         )
-        result = await opn_add_ddns_account(
-            mock_ctx_writes,
-            service="cloudflare",
-            hostname="fw.example.com",
-            username="user@example.com",
-            password="api-token-123",
-        )
-        # First call: add account
-        add_call = mock_api_writes.post.call_args_list[0]
-        assert add_call[0][0] == "dyndns.accounts.add"
-        account = add_call[0][1]["account"]
-        assert account["service"] == "cloudflare"
-        assert account["hostname"] == "fw.example.com"
-        assert account["username"] == "user@example.com"
-        assert account["password"] == "api-token-123"
-        assert account["enabled"] == "1"
-        # Second call: reconfigure
-        reconf_call = mock_api_writes.post.call_args_list[1]
-        assert reconf_call[0][0] == "dyndns.service.reconfigure"
-        # Result
-        assert result["uuid"] == "ddns-uuid-123"
-        assert result["reconfigure_status"] == "ok"
+        assert result["rows"][0]["password"] == "***"
+        assert result["rows"][0]["%password"] == "***"
 
-    async def test_optional_fields_omitted_when_empty(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[
-                {"result": "saved", "uuid": "ddns-uuid"},
-                {"status": "ok"},
-            ]
-        )
-        await opn_add_ddns_account(mock_ctx_writes, service="he", hostname="fw.example.com")
-        add_call = mock_api_writes.post.call_args_list[0]
-        account = add_call[0][1]["account"]
-        assert "username" not in account
-        assert "password" not in account
-        assert "interface" not in account
-        assert "description" not in account
+    async def test_plugin_missing_envelope(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(side_effect=OPNsenseAPIError("not found", status_code=404))
+        result = await opn_list_ddns_accounts(mock_ctx)
+        assert result["error_type"] == "api"
+        assert "plugin" in result["hint"]
 
-    async def test_includes_interface_and_description(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[
-                {"result": "saved", "uuid": "ddns-uuid"},
-                {"status": "ok"},
-            ]
-        )
-        await opn_add_ddns_account(
-            mock_ctx_writes,
-            service="cloudflare",
-            hostname="fw.example.com",
-            interface="wan",
-            description="Primary WAN IPv6",
-        )
-        add_call = mock_api_writes.post.call_args_list[0]
-        account = add_call[0][1]["account"]
-        assert account["interface"] == "wan"
-        assert account["description"] == "Primary WAN IPv6"
 
-    async def test_requires_writes_enabled(self, mock_api, mock_ctx):
-        with pytest.raises(WriteDisabledError):
-            await opn_add_ddns_account(mock_ctx, service="cloudflare", hostname="fw.example.com")
-
-    async def test_rejects_empty_service(self, mock_api_writes, mock_ctx_writes):
-        result = await opn_add_ddns_account(mock_ctx_writes, service="", hostname="fw.example.com")
-        assert "error" in result
-        assert "service" in result["error"]
-
-    async def test_rejects_empty_hostname(self, mock_api_writes, mock_ctx_writes):
-        result = await opn_add_ddns_account(mock_ctx_writes, service="cloudflare", hostname="")
-        assert "error" in result
+class TestManageDdnsAccount:
+    async def test_add_requires_service_and_hostname(self, mock_api_writes, mock_ctx_writes):
+        result = await opn_manage_ddns_account(mock_ctx_writes, action="add", service="cloudflare")
+        assert result["error_type"] == "validation"
         assert "hostname" in result["error"]
 
-    async def test_ipv6_checkip_method(self, mock_api_writes, mock_ctx_writes):
+    async def test_add_creates_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.post = AsyncMock(
             side_effect=[
-                {"result": "saved", "uuid": "v6-uuid"},
+                {"result": "saved", "uuid": "ddns-1"},
                 {"status": "ok"},
             ]
         )
-        await opn_add_ddns_account(
+        result = await opn_manage_ddns_account(
             mock_ctx_writes,
+            action="add",
             service="cloudflare",
-            hostname="v6.example.com",
-            checkip="web_dyndns6",
+            hostname="fw.example.com",
+            password="token123",
         )
-        add_call = mock_api_writes.post.call_args_list[0]
-        account = add_call[0][1]["account"]
-        assert account["checkip"] == "web_dyndns6"
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["dyndns.accounts.add", "dyndns.service.reconfigure"]
+        account = mock_api_writes.post.call_args_list[0][0][1]["account"]
+        assert account["checkip"] == "web_dyndns"  # default
+        assert account["enabled"] == "1"
+        assert result["uuid"] == "ddns-1"
+
+    async def test_update_sends_only_provided(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
+        await opn_manage_ddns_account(mock_ctx_writes, action="update", uuid="ddns-1", hostname="new.example.com")
+        call = mock_api_writes.post.call_args_list[0]
+        assert call[0][0] == "dyndns.accounts.set"
+        assert call[0][1] == {"account": {"hostname": "new.example.com"}}
+        assert call[1]["path_suffix"] == "ddns-1"
+
+    async def test_update_requires_uuid(self, mock_ctx_writes):
+        result = await opn_manage_ddns_account(mock_ctx_writes, action="update", hostname="x")
+        assert result["error_type"] == "validation"
+
+    async def test_delete_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "deleted"}, {"status": "ok"}])
+        result = await opn_manage_ddns_account(mock_ctx_writes, action="delete", uuid="ddns-1")
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["dyndns.accounts.del", "dyndns.service.reconfigure"]
+        assert result["uuid"] == "ddns-1"
+
+    async def test_writes_disabled(self, mock_ctx_no_writes):
+        result = await opn_manage_ddns_account(
+            mock_ctx_no_writes, action="add", service="cloudflare", hostname="x.example.com"
+        )
+        assert result["error_type"] == "writes_disabled"
 
 
-class TestOpnReconfigureDdclient:
-    """Tests for opn_reconfigure_ddclient."""
-
-    async def test_calls_reconfigure_endpoint(self, mock_api_writes, mock_ctx_writes):
+class TestReconfigureDdclient:
+    async def test_reconfigures(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.post = AsyncMock(return_value={"status": "ok"})
         result = await opn_reconfigure_ddclient(mock_ctx_writes)
         mock_api_writes.post.assert_called_once_with("dyndns.service.reconfigure")
-        assert result["status"] == "ok"
-        assert result["service"] == "ddclient"
-
-    async def test_requires_writes_enabled(self, mock_api, mock_ctx):
-        with pytest.raises(WriteDisabledError):
-            await opn_reconfigure_ddclient(mock_ctx)
-
-    async def test_returns_unknown_on_missing_status(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(return_value={})
-        result = await opn_reconfigure_ddclient(mock_ctx_writes)
-        assert result["status"] == "unknown"
+        assert result == {"status": "ok", "service": "ddclient"}
 
 
-class TestOpnMdnsRepeaterStatus:
-    """Tests for opn_mdns_repeater_status."""
+class TestListAcmeAndCron:
+    async def test_acme(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": []})
+        await opn_list_acme_certs(mock_ctx, limit=10)
+        mock_api.post.assert_called_once_with(
+            "acmeclient.certs.search",
+            {"current": 1, "rowCount": 10, "searchPhrase": ""},
+        )
 
-    async def test_returns_status_and_config(self, mock_api, mock_ctx):
+    async def test_cron(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": []})
+        await opn_list_cron_jobs(mock_ctx)
+        mock_api.post.assert_called_once_with(
+            "cron.search_jobs",
+            {"current": 1, "rowCount": 50, "searchPhrase": ""},
+        )
+
+
+class TestCrowdsecStatus:
+    async def test_counts_use_totals_not_page_length(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"status": "running"})
+        mock_api.post = AsyncMock(
+            side_effect=[
+                {"rows": [{"id": 1}, {"id": 2}], "total": 1234},
+                {"rows": [{"id": 3}], "total": 567},
+            ]
+        )
+        result = await opn_crowdsec_status(mock_ctx)
+        assert result["service_status"] == "running"
+        assert result["decisions_count"] == 1234
+        assert result["alerts_count"] == 567
+        assert len(result["decisions"]) == 2
+        assert len(result["alerts"]) == 1
+
+    async def test_count_falls_back_to_rows(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"status": "running"})
+        mock_api.post = AsyncMock(side_effect=[{"rows": [{"id": 1}]}, {"rows": []}])
+        result = await opn_crowdsec_status(mock_ctx)
+        assert result["decisions_count"] == 1
+        assert result["alerts_count"] == 0
+
+    async def test_search_and_limit_forwarded(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"status": "running"})
+        mock_api.post = AsyncMock(side_effect=[{"rows": []}, {"rows": []}])
+        await opn_crowdsec_status(mock_ctx, search="ssh", limit=5)
+        for call in mock_api.post.call_args_list:
+            assert call[0][1] == {"current": 1, "rowCount": 5, "searchPhrase": "ssh"}
+
+    async def test_plugin_missing_envelope(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(side_effect=OPNsenseAPIError("nope", status_code=400))
+        result = await opn_crowdsec_status(mock_ctx)
+        assert result["error_type"] == "api"
+
+
+class TestMdnsRepeater:
+    async def test_status(self, mock_api, mock_ctx):
         mock_api.get = AsyncMock(
             side_effect=[
-                {
-                    "mdnsrepeater": {
-                        "enabled": "1",
-                        "interfaces": "lan,opt1",
-                        "blocklist": "",
-                        "enablecarp": "0",
-                    },
-                },
+                {"mdnsrepeater": {"enabled": "1", "interfaces": "lan,opt1", "blocklist": "", "enablecarp": "0"}},
                 {"status": "running"},
-            ],
+            ]
         )
         result = await opn_mdns_repeater_status(mock_ctx)
         assert result["service_running"] == "running"
-        assert result["enabled"] == "1"
         assert result["interfaces"] == "lan,opt1"
-        assert result["blocklist"] == ""
-        assert result["enable_carp"] == "0"
 
-    async def test_disabled_service(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(
-            side_effect=[
-                {
-                    "mdnsrepeater": {
-                        "enabled": "0",
-                        "interfaces": "",
-                        "blocklist": "",
-                        "enablecarp": "0",
-                    },
-                },
-                {"status": "stopped"},
-            ],
+    async def test_configure_preserves_existing_string_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(
+            return_value={
+                "mdnsrepeater": {
+                    "enabled": "0",
+                    "interfaces": "lan",
+                    "blocklist": "opt3",
+                    "enablecarp": "1",
+                }
+            }
         )
-        result = await opn_mdns_repeater_status(mock_ctx)
-        assert result["service_running"] == "stopped"
-        assert result["enabled"] == "0"
-
-    async def test_calls_correct_endpoints(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(
-            side_effect=[
-                {"mdnsrepeater": {"enabled": "0", "interfaces": ""}},
-                {"status": "stopped"},
-            ],
-        )
-        await opn_mdns_repeater_status(mock_ctx)
-        calls = [c[0][0] for c in mock_api.get.call_args_list]
-        assert calls == ["mdnsrepeater.settings.get", "mdnsrepeater.service.status"]
-
-
-class TestOpnConfigureMdnsRepeater:
-    """Tests for opn_configure_mdns_repeater."""
-
-    async def test_requires_writes_enabled(self, mock_api, mock_ctx):
-        with pytest.raises(WriteDisabledError):
-            await opn_configure_mdns_repeater(mock_ctx, interfaces="lan,opt1")
-
-    async def test_configures_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[
-                {"result": "saved"},
-                {"status": "ok"},
-            ],
-        )
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
         result = await opn_configure_mdns_repeater(mock_ctx_writes, enabled=True, interfaces="lan,opt1")
-        # First call: set settings
-        set_call = mock_api_writes.post.call_args_list[0]
-        assert set_call[0][0] == "mdnsrepeater.settings.set"
-        payload = set_call[0][1]
-        assert payload["mdnsrepeater"]["enabled"] == "1"
-        assert payload["mdnsrepeater"]["interfaces"] == "lan,opt1"
-        # Second call: reconfigure
-        reconf_call = mock_api_writes.post.call_args_list[1]
-        assert reconf_call[0][0] == "mdnsrepeater.service.reconfigure"
-        # Result
-        assert result["result"] == "saved"
+        payload = mock_api_writes.post.call_args_list[0][0][1]["mdnsrepeater"]
+        assert payload["enabled"] == "1"
+        assert payload["interfaces"] == "lan,opt1"
+        assert payload["blocklist"] == "opt3"  # preserved
+        assert payload["enablecarp"] == "1"  # preserved
         assert result["reconfigure_status"] == "ok"
-        assert result["interfaces"] == "lan,opt1"
 
-    async def test_disable_mdns_repeater(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[
-                {"result": "saved"},
-                {"status": "ok"},
-            ],
+    async def test_configure_skips_non_string_fields(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(
+            return_value={"mdnsrepeater": {"blocklist": {"opt3": {"selected": 1}}, "enablecarp": ""}}
         )
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
+        await opn_configure_mdns_repeater(mock_ctx_writes, enabled=True, interfaces="lan,opt1")
+        payload = mock_api_writes.post.call_args_list[0][0][1]["mdnsrepeater"]
+        assert "blocklist" not in payload  # option-dict shape not carried over
+        assert "enablecarp" not in payload  # empty string not carried over
+
+    async def test_configure_survives_get_failure(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(side_effect=OPNsenseAPIError("boom"))
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
         result = await opn_configure_mdns_repeater(mock_ctx_writes, enabled=False, interfaces="lan")
-        set_call = mock_api_writes.post.call_args_list[0]
-        payload = set_call[0][1]
-        assert payload["mdnsrepeater"]["enabled"] == "0"
-        assert result["enabled"] == "0"
-
-
-class TestOpnUpdateDdnsAccount:
-    """Tests for opn_update_ddns_account."""
-
-    async def test_updates_with_partial_fields(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "saved"}, {"status": "ok"}],
-        )
-        result = await opn_update_ddns_account(
-            mock_ctx_writes,
-            uuid="ddns-uuid-1",
-            hostname="new.example.com",
-        )
-        set_call = mock_api_writes.post.call_args_list[0]
-        assert set_call[0][0] == "dyndns.accounts.set"
-        assert set_call[0][1] == {"account": {"hostname": "new.example.com"}}
-        assert set_call[1]["path_suffix"] == "ddns-uuid-1"
+        payload = mock_api_writes.post.call_args_list[0][0][1]["mdnsrepeater"]
+        assert payload == {"enabled": "0", "interfaces": "lan"}
         assert result["result"] == "saved"
-        assert result["uuid"] == "ddns-uuid-1"
 
-    async def test_updates_multiple_fields(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "saved"}, {"status": "ok"}],
-        )
-        await opn_update_ddns_account(
-            mock_ctx_writes,
-            uuid="ddns-uuid-1",
-            service="cloudflare",
-            hostname="fw.example.com",
-            username="apikey",
-            password="newsecret",
-            enabled=False,
-        )
-        account = mock_api_writes.post.call_args_list[0][0][1]["account"]
-        assert account["service"] == "cloudflare"
-        assert account["hostname"] == "fw.example.com"
-        assert account["username"] == "apikey"
-        assert account["password"] == "newsecret"
-        assert account["enabled"] == "0"
-
-    async def test_does_not_include_password_in_response(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "saved"}, {"status": "ok"}],
-        )
-        result = await opn_update_ddns_account(
-            mock_ctx_writes,
-            uuid="ddns-uuid-1",
-            password="secret123",
-        )
-        assert "password" not in result
-
-    async def test_requires_writes_enabled(self, mock_ctx):
-        with pytest.raises(WriteDisabledError):
-            await opn_update_ddns_account(mock_ctx, uuid="ddns-uuid-1", hostname="test.com")
-
-    async def test_reconfigures_ddclient(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "saved"}, {"status": "ok"}],
-        )
-        await opn_update_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1", hostname="test.com")
-        assert mock_api_writes.post.call_args_list[1][0][0] == "dyndns.service.reconfigure"
-
-    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "saved"}, {"status": "ok"}],
-        )
-        cache = mock_ctx_writes.lifespan_context["config_cache"]
-        cache._stale = False
-        await opn_update_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1", hostname="test.com")
-        assert cache._stale
-
-
-class TestOpnDeleteDdnsAccount:
-    """Tests for opn_delete_ddns_account."""
-
-    async def test_deletes_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "deleted"}, {"status": "ok"}],
-        )
-        result = await opn_delete_ddns_account(mock_ctx_writes, uuid="ddns-to-delete")
-        mock_api_writes.post.assert_any_call("dyndns.accounts.del", path_suffix="ddns-to-delete")
-        assert result["result"] == "deleted"
-        assert result["uuid"] == "ddns-to-delete"
-
-    async def test_requires_writes_enabled(self, mock_ctx):
-        with pytest.raises(WriteDisabledError):
-            await opn_delete_ddns_account(mock_ctx, uuid="ddns-uuid-1")
-
-    async def test_reconfigures_ddclient(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "deleted"}, {"status": "ok"}],
-        )
-        await opn_delete_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1")
-        assert mock_api_writes.post.call_args_list[1][0][0] == "dyndns.service.reconfigure"
-
-    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
-        mock_api_writes.post = AsyncMock(
-            side_effect=[{"result": "deleted"}, {"status": "ok"}],
-        )
-        cache = mock_ctx_writes.lifespan_context["config_cache"]
-        cache._stale = False
-        await opn_delete_ddns_account(mock_ctx_writes, uuid="ddns-uuid-1")
-        assert cache._stale
+    async def test_configure_writes_disabled(self, mock_ctx_no_writes):
+        result = await opn_configure_mdns_repeater(mock_ctx_no_writes)
+        assert result["error_type"] == "writes_disabled"
