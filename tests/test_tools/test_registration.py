@@ -20,12 +20,15 @@ class TestToolRegistration:
             "opn_scan_config",
             "opn_get_config_section",
             "opn_mcp_info",
+            "opn_system_health",
             # Network
             "opn_interface_stats",
             "opn_arp_table",
             "opn_ndp_table",
             "opn_ipv6_status",
             "opn_list_static_routes",
+            "opn_find_host",
+            "opn_traffic_top",
             # Firewall
             "opn_list_firewall_rules",
             "opn_list_firewall_aliases",
@@ -91,4 +94,11 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 61, f"Expected 61 tools, got {len(tools)}"
+        assert len(tools) == 64, f"Expected 64 tools, got {len(tools)}"
+
+    async def test_tool_count_under_ceiling(self):
+        """The project's self-imposed tool budget: stay under 65 tools."""
+        from opnsense_mcp.server import mcp
+
+        tools = await mcp.list_tools()
+        assert len(tools) < 65, f"Tool budget exceeded: {len(tools)} >= 65. Consolidate before adding."

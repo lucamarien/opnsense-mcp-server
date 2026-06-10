@@ -168,6 +168,32 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "diagnostics/firewall/queryStates",
         "diagnostics/firewall/query_states",
     ),
+    # Diagnostics — system health (verified in opnsense/core SystemController.php)
+    "diagnostics.system.resources": (
+        "diagnostics/system/systemResources",
+        "diagnostics/system/system_resources",
+    ),
+    "diagnostics.system.disk": (
+        "diagnostics/system/systemDisk",
+        "diagnostics/system/system_disk",
+    ),
+    "diagnostics.system.temperature": (
+        "diagnostics/system/systemTemperature",
+        "diagnostics/system/system_temperature",
+    ),
+    "diagnostics.system.time": (
+        "diagnostics/system/systemTime",
+        "diagnostics/system/system_time",
+    ),
+    # Diagnostics — traffic (one-shot; stream variants are SSE-only and unused)
+    "diagnostics.traffic.interface": (
+        "diagnostics/traffic/interface",
+        "diagnostics/traffic/interface",
+    ),
+    "diagnostics.traffic.top": (
+        "diagnostics/traffic/top",
+        "diagnostics/traffic/top",
+    ),
     # Firmware info (installed packages/plugins)
     "firmware.info": ("core/firmware/info", "core/firmware/info"),
     # Interface configuration details

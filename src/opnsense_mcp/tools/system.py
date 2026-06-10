@@ -8,6 +8,7 @@ from typing import Any
 from fastmcp import Context
 
 from opnsense_mcp import __version__
+from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.config_cache import is_sensitive_tag
 from opnsense_mcp.server import get_api, get_config_cache, mcp
 from opnsense_mcp.tools._util import READ_ONLY, catch_api_errors, clamp_limit
@@ -181,6 +182,41 @@ async def opn_get_config_section(
             "available_sections": cache.available_sections(),
         }
     return result
+
+
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
+async def opn_system_health(ctx: Context) -> dict[str, Any]:
+    """Get system resource health: memory, disk, load, uptime, temperature.
+
+    Use this when you need to check whether the firewall itself is healthy —
+    memory pressure, full disks, high load, overheating — as opposed to
+    opn_security_audit (config posture) or opn_system_status (version info).
+
+    Temperature is hardware-dependent and empty on most VMs — that is normal,
+    not an error. Sections that fail individually are reported as 'unavailable'.
+
+    Returns: dict with 'memory', 'disk' (devices with usage %), 'system'
+    (uptime, loadavg, datetime), and 'temperature' (sensor list).
+    """
+    api = get_api(ctx)
+    health: dict[str, Any] = {}
+    unavailable: list[str] = []
+
+    async def _section(key: str, endpoint: str) -> None:
+        try:
+            health[key] = await api.get(endpoint)
+        except OPNsenseAPIError as exc:
+            unavailable.append(key)
+            health[key] = {"unavailable": str(exc)}
+
+    await _section("memory", "diagnostics.system.resources")
+    await _section("disk", "diagnostics.system.disk")
+    await _section("system", "diagnostics.system.time")
+    await _section("temperature", "diagnostics.system.temperature")
+
+    health["sections_unavailable"] = unavailable
+    return health
 
 
 @mcp.tool(annotations=READ_ONLY)
