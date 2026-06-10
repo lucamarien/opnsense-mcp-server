@@ -52,13 +52,9 @@ class TestToolRegistration:
             "opn_apply_dnsbl",
             # DHCP
             "opn_list_dhcp_leases",
-            "opn_list_kea_leases",
-            "opn_list_dnsmasq_leases",
             "opn_list_dnsmasq_ranges",
-            "opn_add_dnsmasq_range",
+            "opn_manage_dnsmasq_range",
             "opn_reconfigure_dnsmasq",
-            "opn_update_dnsmasq_range",
-            "opn_delete_dnsmasq_range",
             # VPN
             "opn_wireguard_status",
             "opn_ipsec_status",
@@ -98,4 +94,4 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 68, f"Expected 68 tools, got {len(tools)}"
+        assert len(tools) == 64, f"Expected 64 tools, got {len(tools)}"

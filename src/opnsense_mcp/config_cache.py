@@ -130,7 +130,7 @@ async def _get_installed_plugins(api: OPNsenseAPI) -> list[dict[str, str]]:
     return plugins
 
 
-async def _detect_dhcp_backend(api: OPNsenseAPI) -> dict[str, Any]:
+async def detect_dhcp_backend(api: OPNsenseAPI) -> dict[str, Any]:
     """Detect which DHCP backend is active."""
     backends: list[dict[str, Any]] = []
 
@@ -299,7 +299,7 @@ class ConfigCache:
         # --- Collect runtime inventory via API ---
         firmware = await api.get("firmware.status")
         plugins = await _get_installed_plugins(api)
-        dhcp = await _detect_dhcp_backend(api)
+        dhcp = await detect_dhcp_backend(api)
         dns = await _detect_dns_servers(api)
         interfaces = await _get_interfaces(api)
 

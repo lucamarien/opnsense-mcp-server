@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 from opnsense_mcp.api_client import OPNsenseAPI, OPNsenseAPIError, SavepointManager
 from opnsense_mcp.config import load_config
 from opnsense_mcp.config_cache import ConfigCache
-from opnsense_mcp.tools.dhcp import opn_list_dnsmasq_leases, opn_list_dnsmasq_ranges
+from opnsense_mcp.tools.dhcp import opn_list_dhcp_leases, opn_list_dnsmasq_ranges
 from opnsense_mcp.tools.diagnostics import opn_dns_lookup, opn_ping, opn_traceroute
 from opnsense_mcp.tools.dns import opn_list_dns_overrides
 from opnsense_mcp.tools.firewall import opn_list_firewall_rules
@@ -309,7 +309,7 @@ async def main() -> int:
             readiness["DHCPv6 Ranges"] = "NONE"
             readiness["Router Advertisements"] = "NONE (no DHCPv6 ranges)"
             recommendations.append(
-                "No DHCPv6 ranges configured. Use opn_add_dnsmasq_range to create "
+                "No DHCPv6 ranges configured. Use opn_manage_dnsmasq_range to create "
                 "IPv6 ranges with Router Advertisement configuration."
             )
     elif status == "skip":
@@ -322,7 +322,9 @@ async def main() -> int:
 
     # 5b. Leases
     _print_sub("DHCPv6 Leases")
-    status, leases_result = await _safe_call("dnsmasq_leases", opn_list_dnsmasq_leases(ctx, limit=500), optional=True)
+    status, leases_result = await _safe_call(
+        "dnsmasq_leases", opn_list_dhcp_leases(ctx, backend="dnsmasq", limit=500), optional=True
+    )
     if status == "ok":
         leases_rows = leases_result.get("rows", [])
         v6_leases = [le for le in leases_rows if _is_ipv6(le.get("address", ""))]

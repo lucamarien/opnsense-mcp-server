@@ -32,9 +32,7 @@ from opnsense_mcp.config import load_config
 from opnsense_mcp.config_cache import ConfigCache
 from opnsense_mcp.tools.dhcp import (
     opn_list_dhcp_leases,
-    opn_list_dnsmasq_leases,
     opn_list_dnsmasq_ranges,
-    opn_list_kea_leases,
 )
 from opnsense_mcp.tools.diagnostics import (
     opn_dns_lookup,
@@ -229,7 +227,7 @@ async def main() -> int:
         ("opn_list_dnsbl", opn_list_dnsbl(ctx)),
         ("opn_get_dnsbl", opn_get_dnsbl(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02")),
         ("opn_list_cron_jobs", opn_list_cron_jobs(ctx)),
-        ("opn_list_dnsmasq_leases", opn_list_dnsmasq_leases(ctx)),
+        ("opn_list_dhcp_leases[dnsmasq]", opn_list_dhcp_leases(ctx, backend="dnsmasq")),
         ("opn_list_dnsmasq_ranges", opn_list_dnsmasq_ranges(ctx)),
         ("opn_pf_states", opn_pf_states(ctx, limit=20)),
         ("opn_list_nat_rules", opn_list_nat_rules(ctx)),
@@ -256,8 +254,8 @@ async def main() -> int:
         ("opn_list_acme_certs", opn_list_acme_certs(ctx)),
         ("opn_crowdsec_status", opn_crowdsec_status(ctx)),
         ("opn_crowdsec_alerts", opn_crowdsec_alerts(ctx)),
-        ("opn_list_dhcp_leases", opn_list_dhcp_leases(ctx)),
-        ("opn_list_kea_leases", opn_list_kea_leases(ctx)),
+        ("opn_list_dhcp_leases[isc]", opn_list_dhcp_leases(ctx, backend="isc")),
+        ("opn_list_dhcp_leases[kea]", opn_list_dhcp_leases(ctx, backend="kea")),
         ("opn_ipsec_status", opn_ipsec_status(ctx)),
         ("opn_openvpn_status", opn_openvpn_status(ctx)),
         ("opn_list_ddns_accounts", opn_list_ddns_accounts(ctx)),
