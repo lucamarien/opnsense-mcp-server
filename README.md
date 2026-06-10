@@ -48,7 +48,7 @@ pip install opnsense-mcp-server
 uv pip install opnsense-mcp-server
 
 # Using Docker
-docker pull lucamarien/opnsense-mcp-server
+docker pull uhlenheide/opnsense-mcp-server
 
 # From source
 git clone https://github.com/lucamarien/opnsense-mcp-server
@@ -97,7 +97,7 @@ Or add it globally to `~/.claude/claude_code_config.json`.
         "-e", "OPNSENSE_API_SECRET=your-api-secret-here",
         "-e", "OPNSENSE_VERIFY_SSL=false",
         "-e", "OPNSENSE_ALLOW_WRITES=false",
-        "lucamarien/opnsense-mcp-server"
+        "uhlenheide/opnsense-mcp-server"
       ]
     }
   }
@@ -434,6 +434,7 @@ mypy src/ --strict               # Type checking
 Domain-specific guides for common firewall configuration tasks:
 
 - [WhatsApp Calling Firewall Rules](docs/best-practices/voip-whatsapp.md) — Allow WhatsApp voice/video calls through a default-deny firewall using URL table aliases and scoped rules
+- [DDNS with Cloudflare](docs/best-practices/ddns-cloudflare.md) — Configure Dynamic DNS with Cloudflare API tokens, interface checkip methods, and IPv6 EUI-64 addresses
 
 These guides show real-world MCP tool usage patterns and explain the security considerations behind each approach.
 
