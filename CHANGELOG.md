@@ -4,6 +4,83 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-06-10
+
+Framework-compliance release: consolidated tool surface (81 → 64 tools, restoring
+the <65 budget), MCP protocol features (annotations, prompts, resources), a
+corrected NAT safety story, and hardened defaults. Breaking — see the migration
+table below.
+
+### Breaking — tool surface consolidation
+
+Write tools now follow one pattern: `opn_list_*` reads + `opn_manage_*(action=...)`
+writes (HAProxy keeps its resource_type CRUD). Migration:
+
+| Removed (v0.4) | Replacement (v0.5) |
+| --- | --- |
+| `opn_add/update/delete/toggle_firewall_rule` | `opn_manage_firewall_rule(action=add\|update\|delete\|toggle)` |
+| `opn_set_rule_categories` | `opn_manage_firewall_rule(action=update, categories=...)` |
+| `opn_add/update/delete/toggle_alias` | `opn_manage_alias(action=...)` |
+| `opn_add/update/delete_nat_rule` | `opn_manage_nat_rule(action=...)` |
+| `opn_add/delete_firewall_category` | `opn_manage_firewall_category(action=...)` |
+| `opn_add/update/delete_dns_override` | `opn_manage_dns_override(action=...)` |
+| `opn_add_dnsbl_allowlist` + `opn_remove_dnsbl_allowlist` | `opn_edit_dnsbl_allowlist(add_domains, remove_domains)` |
+| `opn_update_dnsbl` | renamed `opn_apply_dnsbl` (it reloads; it never updated config) |
+| `opn_list_kea_leases`, `opn_list_dnsmasq_leases` | `opn_list_dhcp_leases(backend=auto\|dnsmasq\|kea\|isc)` |
+| `opn_add/update/delete_dnsmasq_range` | `opn_manage_dnsmasq_range(action=...)` |
+| `opn_add/update/delete_ddns_account` | `opn_manage_ddns_account(action=...)` |
+| `opn_crowdsec_alerts` | merged into `opn_crowdsec_status(search, limit)` |
+
+Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
+(pass/block/reject) — `action` selects the operation.
+
+### Security & correctness
+
+- **NAT rollback claim corrected** (verified in opnsense/core source): the filter
+  savepoint never covered the d_nat model, and d_nat's own revert is broken
+  upstream. NAT writes are now apply-only via `firewall/d_nat/apply` and the
+  docstrings say so honestly. The previous "60s auto-revert" for NAT was false.
+- `opn_reconfigure_haproxy` now runs configtest first and refuses to apply a
+  failing configuration.
+- `include_sensitive=true` additionally requires `OPNSENSE_ALLOW_SENSITIVE=true`
+  server-side — the model can no longer self-elevate to read secrets.
+- `http://` URLs are refused unless `OPNSENSE_ALLOW_INSECURE_HTTP=true`
+  (credentials travel as Basic Auth).
+- Pattern-based secret redaction (substrings + `*key` suffix) replaces the
+  9-name exact list; non-secret flags (passwordauth) allowlisted.
+- SavepointManager refuses overlapping savepoints inside the 60s confirmation
+  window (undefined upstream semantics).
+- CrowdSec counts use the API `total` field (previously capped at page size).
+- `opn_configure_mdns_repeater` preserves existing blocklist/CARP settings.
+- New `OPNSENSE_API_STYLE=camel|snake` override lets API keys without the
+  firmware/status privilege use the server (version detection is skipped).
+
+### Added
+
+- **MCP protocol features:** ToolAnnotations (readOnly/destructive/idempotent/
+  openWorld) on all 64 tools; prompts `ipv6_migration`, `expose_service`,
+  `remediate_audit`; resources `opnsense://inventory` and
+  `opnsense://config/{section}`.
+- **New tools:** `opn_find_host` (one lookup across ARP/NDP/DHCP leases/DNS
+  overrides), `opn_system_health` (memory/disk/load/uptime/temperature),
+  `opn_traffic_top` (per-host bandwidth snapshot).
+- `opn_arp_table`/`opn_ndp_table` gained `search`/`limit` (previously unbounded).
+- Closed-set parameters are now `Literal` enums (validated client-side).
+- Uniform error envelope `{"error", "error_type", "status_code", "hint"}` on all
+  tools; plugin-missing errors carry an actionable hint.
+- Untrusted-data notes on tools surfacing device-supplied strings (lease
+  hostnames, ARP/NDP, CrowdSec alerts, firewall log, DNS lookups).
+- Convention meta-tests (annotations/docstrings/revert-story) and a 90% coverage
+  gate in CI; tool budget (<65) enforced by test.
+- Docker image runs as non-root; OCI labels; fastmcp bounded `>=2.0,<4`
+  (suite verified against fastmcp 3.4.2).
+
+### Future ideas (verified feasible, not implemented to respect the tool budget)
+
+- Wake-on-LAN (`wol/wol/set`, os-wol plugin)
+- IDS status/alerts (`ids/service/status`, `ids/service/queryAlerts`)
+- System certificate inventory (`trust/cert/search`)
+
 ## [0.4.0] - 2026-03-27
 
 ### Added

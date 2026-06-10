@@ -37,7 +37,8 @@ This runs: lint, format check, security scan, type check, tests, and dependency 
 7. Review against the security checklist below
 
 ```python
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)  # presets in tools/_util.py
+@catch_api_errors                 # uniform {"error", "error_type"} envelope
 async def opn_example_tool(ctx: Context, search: str = "", limit: int = 50) -> dict[str, Any]:
     """One-line description of what this does.
 
@@ -45,15 +46,31 @@ async def opn_example_tool(ctx: Context, search: str = "", limit: int = 50) -> d
     Returns: dict with 'rows' (list) and 'total' (int).
     """
     api = get_api(ctx)
-    return await api.get("endpoint.logical_name")
+    return await api.post("endpoint.logical_name", {"current": 1, "rowCount": clamp_limit(limit), "searchPhrase": search})
 ```
 
-### Tool Naming
+### Tool Naming & Surface Pattern
 
-- All tools use the `opn_` prefix
-- Use descriptive names: `opn_list_firewall_rules`, `opn_add_dns_override`
-- Read tools: `opn_list_*`, `opn_*_status`, `opn_get_*`
-- Write tools: `opn_add_*`, `opn_delete_*`, `opn_toggle_*`, `opn_reconfigure_*`
+- All tools use the `opn_` prefix; **tool budget: the total count must stay below 65**
+  (enforced by `test_registration.py`) — consolidate before adding
+- Read tools: `opn_list_*`, `opn_get_*`, `opn_*_status`
+- Write tools: one `opn_manage_<entity>(action=Literal["add","update","delete",...])`
+  per entity — do NOT add separate add/update/delete tools (HAProxy's generic
+  `resource_type` CRUD is the one sanctioned exception)
+- Closed-set parameters use `Literal[...]` types, never free strings + manual validation
+
+### Annotations, Errors, Docstrings (enforced by tests/test_tools/test_meta.py)
+
+- Every tool carries a `ToolAnnotations` preset from `tools/_util.py`
+  (READ_ONLY / READ_PROBE / WRITE / WRITE_IDEMPOTENT / DESTRUCTIVE)
+- Every tool is wrapped in `@catch_api_errors` (below `@mcp.tool`) — never raise
+  out of a tool body for expected failures; return `{"error", "error_type"}` dicts
+- Every docstring has a `Returns:` line and, for write tools, an explicit revert
+  story ("auto-revert" / "applies immediately" / "not applied until ...")
+- Tools that surface device-supplied strings (hostnames, log lines, alerts) add an
+  untrusted-data SECURITY note
+- Avoid Google-style `Args:` sections — FastMCP strips them from the model-visible
+  description; use a `Parameters:` list instead
 
 ### Endpoint Registry
 
@@ -127,7 +144,7 @@ pytest -v --tb=long
 
 - **GET vs POST:** Status/read operations use GET. Search with filters uses POST. Modifications/actions use POST.
 - **Write guard?** Read operations don't need one. Firewall changes need write guard + savepoint. Other modifications (DNS, HAProxy) need write guard only.
-- **Savepoint?** Firewall rule changes (add/delete/toggle) use savepoints with 60-second auto-revert. Service reconfigurations (Unbound, HAProxy, dnsmasq) do not.
+- **Savepoint?** Firewall filter-rule and category changes use savepoints with 60-second auto-revert. NAT, aliases, DNS, DHCP, DDNS, and service reconfigurations do NOT (OPNsense's savepoint mechanism only covers the filter model) — their docstrings must say "applies immediately".
 
 ## Pull Request Checklist
 
