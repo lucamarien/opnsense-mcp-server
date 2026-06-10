@@ -27,10 +27,28 @@ class TestOpnArpTable:
     """Tests for opn_arp_table."""
 
     async def test_calls_interface_arp(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"arp": []})
+        mock_api.get = AsyncMock(return_value={"rows": [{"ip": "10.0.0.1", "mac": "aa:bb", "hostname": "gw"}]})
         result = await opn_arp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.arp")
-        assert result == {"arp": []}
+        assert result["total"] == 1
+        assert result["entries"][0]["ip"] == "10.0.0.1"
+
+    async def test_search_filters_entries(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(
+            return_value=[
+                {"ip": "10.0.0.1", "mac": "aa:bb", "hostname": "gw"},
+                {"ip": "10.0.0.2", "mac": "cc:dd", "hostname": "printer"},
+            ]
+        )
+        result = await opn_arp_table(mock_ctx, search="printer")
+        assert result["total"] == 1
+        assert result["entries"][0]["hostname"] == "printer"
+
+    async def test_limit_truncates(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value=[{"ip": f"10.0.0.{i}"} for i in range(50)])
+        result = await opn_arp_table(mock_ctx, limit=10)
+        assert len(result["entries"]) == 10
+        assert result["total"] == 50
 
 
 class TestOpnNdpTable:
@@ -44,14 +62,14 @@ class TestOpnNdpTable:
         )
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
-        assert isinstance(result, list)
-        assert result[0]["ip"] == "fe80::1"
+        assert result["total"] == 1
+        assert result["entries"][0]["ip"] == "fe80::1"
 
     async def test_returns_empty_ndp_table(self, mock_api, mock_ctx):
         mock_api.get = AsyncMock(return_value=[])
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
-        assert result == []
+        assert result == {"entries": [], "total": 0}
 
 
 class TestOpnIpv6Status:

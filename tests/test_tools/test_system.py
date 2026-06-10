@@ -103,7 +103,19 @@ class TestOpnDownloadConfig:
         assert "firewall" in result["config_xml"]
         assert result["size_bytes"] > 0
 
+    async def test_include_sensitive_refused_without_env_gate(self, mock_api, mock_ctx):
+        mock_api.get_text = AsyncMock(return_value=self._SAMPLE_XML)
+
+        result = await opn_download_config(mock_ctx, include_sensitive=True)
+
+        assert result["error_type"] == "sensitive_disabled"
+        assert "config_xml" not in result
+        mock_api.get_text.assert_not_called()
+
     async def test_downloads_config_without_stripping(self, mock_api, mock_ctx):
+        import dataclasses
+
+        mock_api._config = dataclasses.replace(mock_api.config, allow_sensitive=True)
         mock_api.get_text = AsyncMock(return_value=self._SAMPLE_XML)
 
         result = await opn_download_config(mock_ctx, include_sensitive=True)
@@ -262,7 +274,15 @@ class TestOpnGetConfigSection:
         result = await opn_get_config_section(mock_ctx, section="system")
         assert result["data"]["password"] == "[REDACTED]"
 
+    async def test_include_sensitive_refused_without_env_gate(self, mock_api, mock_ctx):
+        self._setup_mock_api(mock_api)
+        result = await opn_get_config_section(mock_ctx, section="system", include_sensitive=True)
+        assert result["error_type"] == "sensitive_disabled"
+
     async def test_include_sensitive(self, mock_api, mock_ctx):
+        import dataclasses
+
+        mock_api._config = dataclasses.replace(mock_api.config, allow_sensitive=True)
         self._setup_mock_api(mock_api)
         result = await opn_get_config_section(mock_ctx, section="system", include_sensitive=True)
         assert result["data"]["password"] == "secret123"

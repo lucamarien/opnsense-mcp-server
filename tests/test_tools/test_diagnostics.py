@@ -223,15 +223,15 @@ class TestOpnTraceroute:
         assert payload["protocol"] == "UDP"
         assert payload["ipproto"] == "6"
 
-    async def test_rejects_invalid_protocol(self, mock_api, mock_ctx):
-        result = await opn_traceroute(mock_ctx, host="8.8.8.8", protocol="INVALID")
-        assert "error" in result
-        assert "protocol" in result["error"].lower()
+    async def test_protocol_and_ip_version_are_schema_enums(self):
+        # Validation moved to the JSON schema via Literal types — clients
+        # reject invalid values before a round-trip.
+        from opnsense_mcp.server import mcp
 
-    async def test_rejects_invalid_ip_version(self, mock_api, mock_ctx):
-        result = await opn_traceroute(mock_ctx, host="8.8.8.8", ip_version="5")
-        assert "error" in result
-        assert "ip_version" in result["error"].lower()
+        tools = {t.name: t for t in await mcp.list_tools()}
+        props = tools["opn_traceroute"].parameters["properties"]
+        assert set(props["protocol"].get("enum", [])) == {"ICMP", "UDP", "TCP"}
+        assert set(props["ip_version"].get("enum", [])) == {"4", "6"}
 
     async def test_rejects_invalid_hostname(self, mock_api, mock_ctx):
         result = await opn_traceroute(mock_ctx, host="host | cat /etc/passwd")
