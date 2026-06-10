@@ -160,6 +160,74 @@ class TestAllowWrites:
             self._load_with_writes("sometimes")
 
 
+class TestUrlScheme:
+    """Tests for http/https URL scheme enforcement."""
+
+    def _load_with_url(self, url: str, extra: dict[str, str] | None = None):
+        env = {
+            "OPNSENSE_URL": url,
+            "OPNSENSE_API_KEY": "key",
+            "OPNSENSE_API_SECRET": "secret",
+        }
+        if extra:
+            env.update(extra)
+        with patch.dict("os.environ", env, clear=True):
+            return load_config()
+
+    def test_https_accepted(self):
+        config = self._load_with_url("https://10.0.0.1/api")
+        assert config.url == "https://10.0.0.1/api"
+
+    def test_http_rejected_by_default(self):
+        with pytest.raises(ConfigError, match="cleartext"):
+            self._load_with_url("http://10.0.0.1/api")
+
+    def test_http_allowed_with_override(self):
+        config = self._load_with_url(
+            "http://10.0.0.1/api",
+            {"OPNSENSE_ALLOW_INSECURE_HTTP": "true"},
+        )
+        assert config.url == "http://10.0.0.1/api"
+
+    def test_schemeless_url_rejected(self):
+        with pytest.raises(ConfigError, match="https://"):
+            self._load_with_url("10.0.0.1/api")
+
+    def test_invalid_override_value_raises(self):
+        with pytest.raises(ConfigError, match="OPNSENSE_ALLOW_INSECURE_HTTP"):
+            self._load_with_url(
+                "http://10.0.0.1/api",
+                {"OPNSENSE_ALLOW_INSECURE_HTTP": "perhaps"},
+            )
+
+
+class TestAllowSensitive:
+    """Tests for OPNSENSE_ALLOW_SENSITIVE parsing."""
+
+    def _load_with_sensitive(self, value: str | None):
+        env = {
+            "OPNSENSE_URL": "https://10.0.0.1/api",
+            "OPNSENSE_API_KEY": "key",
+            "OPNSENSE_API_SECRET": "secret",
+        }
+        if value is not None:
+            env["OPNSENSE_ALLOW_SENSITIVE"] = value
+        with patch.dict("os.environ", env, clear=True):
+            return load_config()
+
+    def test_default_false(self):
+        config = self._load_with_sensitive(None)
+        assert config.allow_sensitive is False
+
+    def test_true(self):
+        config = self._load_with_sensitive("true")
+        assert config.allow_sensitive is True
+
+    def test_invalid_raises_error(self):
+        with pytest.raises(ConfigError, match="OPNSENSE_ALLOW_SENSITIVE"):
+            self._load_with_sensitive("kinda")
+
+
 class TestConfigFrozen:
     """Tests that the config object is immutable."""
 
