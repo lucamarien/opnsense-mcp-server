@@ -1458,12 +1458,13 @@ async def opn_security_audit(ctx: Context) -> dict[str, Any]:
     Findings are tagged with applicable compliance frameworks:
     PCI DSS v4.0, BSI IT-Grundschutz, NIST SP 800-41, CIS Benchmarks.
 
-    Returns a structured audit report with findings categorized by severity
-    (critical, warning, info).  Each finding includes a recommendation and
-    applicable compliance framework references.
-
     Use this when you need to assess the security posture of the firewall,
     identify misconfigurations, or perform a routine health check.
+
+    Returns: structured audit report dict with one key per checked section,
+    findings categorized by severity (critical, warning, info), and a
+    'summary' with totals. Each finding includes a recommendation and
+    compliance framework references.
     """
     api = get_api(ctx)
     cache = get_config_cache(ctx)

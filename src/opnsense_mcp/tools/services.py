@@ -185,7 +185,8 @@ async def opn_reconfigure_ddclient(ctx: Context) -> dict[str, Any]:
     Use this after manually editing DDNS account settings to apply the
     changes to the running ddclient service. opn_manage_ddns_account
     reconfigures automatically — this is only needed for manual edits or
-    troubleshooting.
+    troubleshooting. Changes take effect immediately (no savepoint
+    protection).
 
     Note: Requires the Dynamic DNS plugin (os-ddclient).
     Returns: dict with 'status' indicating success or failure.
@@ -327,13 +328,14 @@ async def opn_configure_mdns_repeater(
     Chromecast, AirPlay, and other mDNS-based device discovery across VLANs.
 
     Existing settings not covered by the parameters (blocklist, CARP) are
-    read first and preserved where possible.
+    read first and preserved where possible. Changes take effect immediately
+    (the service is reconfigured automatically; no savepoint protection).
 
-    Args:
-        enabled: Whether to enable the mDNS Repeater service.
-        interfaces: Comma-separated list of interface names to relay between
-                    (e.g. 'lan,opt1'). Minimum 2 interfaces required for
-                    cross-VLAN relay. Maximum 5 interfaces supported.
+    Parameters:
+    - enabled: whether to enable the mDNS Repeater service
+    - interfaces: comma-separated interface names to relay between
+      (e.g. 'lan,opt1'). Minimum 2 interfaces for cross-VLAN relay,
+      maximum 5 supported.
 
     Note: Requires the mDNS Repeater plugin (os-mdns-repeater) to be installed.
     Returns: dict with 'result' and 'reconfigure_status'.

@@ -18,6 +18,9 @@ typecheck:  ## Run mypy strict type checking
 test:  ## Run test suite
 	pytest -v --tb=short
 
+coverage:  ## Run test suite with the CI coverage gate
+	pytest -q --cov=opnsense_mcp --cov-report=term --cov-fail-under=90
+
 test-domain:  ## Run tests for a specific domain (usage: make test-domain DOMAIN=system)
 	pytest tests/test_tools/test_$(DOMAIN).py -v --tb=long
 	ruff check src/opnsense_mcp/tools/$(DOMAIN).py
