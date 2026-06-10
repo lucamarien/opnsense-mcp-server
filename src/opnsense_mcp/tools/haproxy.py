@@ -1,13 +1,26 @@
-"""HAProxy tools — status, configuration CRUD, and service management."""
+"""HAProxy tools — status, configuration CRUD, and service management.
+
+HAProxy keeps the generic resource_type CRUD pattern (rather than per-entity
+manage tools) because all 9 resource types share an identical uniform API.
+"""
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Literal
 
 from fastmcp import Context
 
 from opnsense_mcp.api_client import ENDPOINT_REGISTRY
 from opnsense_mcp.server import get_api, get_config_cache, mcp
+from opnsense_mcp.tools._util import (
+    DESTRUCTIVE,
+    READ_ONLY,
+    WRITE,
+    WRITE_IDEMPOTENT,
+    catch_api_errors,
+    clamp_limit,
+)
 
 # --- Resource type mapping: plural -> singular ---
 _HAPROXY_RESOURCES: dict[str, str] = {
@@ -22,28 +35,43 @@ _HAPROXY_RESOURCES: dict[str, str] = {
     "mailers": "mailer",
 }
 
+_ResourceType = Literal[
+    "frontends",
+    "backends",
+    "servers",
+    "actions",
+    "acls",
+    "healthchecks",
+    "errorfiles",
+    "resolvers",
+    "mailers",
+]
 
-def _ensure_haproxy_endpoint(verb: str, singular: str) -> str:
-    """Register a HAProxy CRUD endpoint dynamically and return its logical name.
+# The OPNsense HAProxy API is uniform: every resource type supports the same
+# get/add/set/del pattern. Register all CRUD endpoints at import time.
+for _singular in _HAPROXY_RESOURCES.values():
+    for _verb in ("get", "add", "set", "del"):
+        _logical = f"haproxy.settings.{_verb}_{_singular}"
+        ENDPOINT_REGISTRY.setdefault(
+            _logical,
+            (
+                f"haproxy/settings/{_verb}{_singular.capitalize()}",
+                f"haproxy/settings/{_verb}_{_singular}",
+            ),
+        )
 
-    The OPNsense HAProxy API is uniform: every resource type supports the same
-    get/add/set/del pattern. Rather than registering 36+ endpoints statically,
-    this function creates registry entries on demand.
-    """
-    logical = f"haproxy.settings.{verb}_{singular}"
-    if logical not in ENDPOINT_REGISTRY:
-        camel = f"haproxy/settings/{verb}{singular.capitalize()}"
-        snake = f"haproxy/settings/{verb}_{singular}"
-        ENDPOINT_REGISTRY[logical] = (camel, snake)
-    return logical
-
-
-def _validate_resource_type(resource_type: str) -> str | None:
-    """Validate and return the singular form, or None on error."""
-    return _HAPROXY_RESOURCES.get(resource_type)
+# Strings in `haproxy -c` output that indicate a broken configuration.
+_CONFIGTEST_FAILURE_MARKERS = ("alert", "error", "fatal")
 
 
-@mcp.tool()
+def _configtest_failed(result: dict[str, Any]) -> bool:
+    """Heuristic: does a configtest response indicate a broken config?"""
+    text = json.dumps(result).lower()
+    return any(marker in text for marker in _CONFIGTEST_FAILURE_MARKERS)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_haproxy_status(ctx: Context) -> dict[str, Any]:
     """Get HAProxy load balancer status and backend health.
 
@@ -56,32 +84,11 @@ async def opn_haproxy_status(ctx: Context) -> dict[str, Any]:
     return await api.get("haproxy.service.status")
 
 
-@mcp.tool()
-async def opn_reconfigure_haproxy(ctx: Context) -> dict[str, Any]:
-    """Apply pending HAProxy load balancer configuration changes.
-
-    Use this after making HAProxy configuration changes to apply them to the
-    running HAProxy service. This reconfigures HAProxy with the new settings.
-
-    NOTE: This does not use savepoint protection. HAProxy changes take effect
-    immediately. Requires the HAProxy plugin (os-haproxy).
-    IMPORTANT: Do NOT call haproxy/service/start after reconfigure — reconfigure
-    already starts the service, and start will error if already running.
-    IMPORTANT: Always call opn_haproxy_configtest before reconfiguring to
-    validate the configuration syntax.
-    Returns: dict with 'status' indicating success or failure.
-    """
-    api = get_api(ctx)
-    api.require_writes()
-    result = await api.post("haproxy.service.reconfigure")
-    get_config_cache(ctx).invalidate()
-    return {"status": result.get("status", "unknown"), "service": "haproxy"}
-
-
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_haproxy_search(
     ctx: Context,
-    resource_type: str,
+    resource_type: _ResourceType,
     search: str = "",
     limit: int = 50,
 ) -> dict[str, Any]:
@@ -103,23 +110,19 @@ async def opn_haproxy_search(
 
     Returns: dict with 'rows' (list of resources) and 'rowCount' (total).
     """
-    singular = _validate_resource_type(resource_type)
-    if singular is None:
-        valid = ", ".join(sorted(_HAPROXY_RESOURCES))
-        return {"error": f"Invalid resource_type '{resource_type}'. Must be one of: {valid}"}
-
     api = get_api(ctx)
     endpoint = f"haproxy.settings.search_{resource_type}"
     return await api.post(
         endpoint,
-        {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
+        {"current": 1, "rowCount": clamp_limit(limit), "searchPhrase": search},
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_haproxy_get(
     ctx: Context,
-    resource_type: str,
+    resource_type: _ResourceType,
     uuid: str,
 ) -> dict[str, Any]:
     """Get detailed configuration for a specific HAProxy resource.
@@ -128,25 +131,18 @@ async def opn_haproxy_get(
     Returns the full field set including SSL, tuning, persistence, and linked
     resources.
 
-    Resource types: frontends, backends, servers, actions, acls, healthchecks,
-    errorfiles, resolvers, mailers.
-
     Returns: dict with the resource type as key containing all field values.
     """
-    singular = _validate_resource_type(resource_type)
-    if singular is None:
-        valid = ", ".join(sorted(_HAPROXY_RESOURCES))
-        return {"error": f"Invalid resource_type '{resource_type}'. Must be one of: {valid}"}
-
     api = get_api(ctx)
-    logical = _ensure_haproxy_endpoint("get", singular)
-    return await api.get(logical, path_suffix=uuid)
+    singular = _HAPROXY_RESOURCES[resource_type]
+    return await api.get(f"haproxy.settings.get_{singular}", path_suffix=uuid)
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE)
+@catch_api_errors
 async def opn_haproxy_add(
     ctx: Context,
-    resource_type: str,
+    resource_type: _ResourceType,
     config: dict[str, Any],
 ) -> dict[str, Any]:
     """Create a new HAProxy resource.
@@ -174,31 +170,27 @@ async def opn_haproxy_add(
     - Backend resolvePrefer: config={"name": "pool1", "mode": "http",
       "algorithm": "roundrobin", "resolvePrefer": "ipv6"}
 
-    NOTE: Changes are NOT applied until you call opn_reconfigure_haproxy.
-    Call opn_haproxy_configtest first to validate the configuration.
+    NOTE: Changes are NOT applied until you call opn_reconfigure_haproxy
+    (which validates the configuration first and refuses to apply a broken one).
 
     Returns: dict with 'result' (str) and 'uuid' (str) of the new resource.
     """
-    singular = _validate_resource_type(resource_type)
-    if singular is None:
-        valid = ", ".join(sorted(_HAPROXY_RESOURCES))
-        return {"error": f"Invalid resource_type '{resource_type}'. Must be one of: {valid}"}
-
     if not config:
-        return {"error": "config must not be empty"}
+        return {"error": "config must not be empty", "error_type": "validation"}
 
     api = get_api(ctx)
     api.require_writes()
-    logical = _ensure_haproxy_endpoint("add", singular)
-    result = await api.post(logical, {singular: config})
+    singular = _HAPROXY_RESOURCES[resource_type]
+    result = await api.post(f"haproxy.settings.add_{singular}", {singular: config})
     get_config_cache(ctx).invalidate()
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+@catch_api_errors
 async def opn_haproxy_update(
     ctx: Context,
-    resource_type: str,
+    resource_type: _ResourceType,
     uuid: str,
     config: dict[str, Any],
 ) -> dict[str, Any]:
@@ -209,34 +201,27 @@ async def opn_haproxy_update(
 
     To enable/disable a resource, set config={"enabled": "1"} or {"enabled": "0"}.
 
-    Resource types: frontends, backends, servers, actions, acls, healthchecks,
-    errorfiles, resolvers, mailers.
-
-    NOTE: Changes are NOT applied until you call opn_reconfigure_haproxy.
-    Call opn_haproxy_configtest first to validate the configuration.
+    NOTE: Changes are NOT applied until you call opn_reconfigure_haproxy
+    (which validates the configuration first and refuses to apply a broken one).
 
     Returns: dict with 'result' indicating success.
     """
-    singular = _validate_resource_type(resource_type)
-    if singular is None:
-        valid = ", ".join(sorted(_HAPROXY_RESOURCES))
-        return {"error": f"Invalid resource_type '{resource_type}'. Must be one of: {valid}"}
-
     if not config:
-        return {"error": "config must not be empty"}
+        return {"error": "config must not be empty", "error_type": "validation"}
 
     api = get_api(ctx)
     api.require_writes()
-    logical = _ensure_haproxy_endpoint("set", singular)
-    result = await api.post(logical, {singular: config}, path_suffix=uuid)
+    singular = _HAPROXY_RESOURCES[resource_type]
+    result = await api.post(f"haproxy.settings.set_{singular}", {singular: config}, path_suffix=uuid)
     get_config_cache(ctx).invalidate()
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=DESTRUCTIVE)
+@catch_api_errors
 async def opn_haproxy_delete(
     ctx: Context,
-    resource_type: str,
+    resource_type: _ResourceType,
     uuid: str,
 ) -> dict[str, Any]:
     """Delete a HAProxy resource by UUID.
@@ -246,34 +231,63 @@ async def opn_haproxy_delete(
     - Delete actions/ACLs before deleting frontends/backends that link them
     - Delete backends before deleting frontends that use them as defaultBackend
 
-    Resource types: frontends, backends, servers, actions, acls, healthchecks,
-    errorfiles, resolvers, mailers.
-
     NOTE: Changes are NOT applied until you call opn_reconfigure_haproxy.
 
     Returns: dict with 'result' indicating success.
     """
-    singular = _validate_resource_type(resource_type)
-    if singular is None:
-        valid = ", ".join(sorted(_HAPROXY_RESOURCES))
-        return {"error": f"Invalid resource_type '{resource_type}'. Must be one of: {valid}"}
-
     api = get_api(ctx)
     api.require_writes()
-    logical = _ensure_haproxy_endpoint("del", singular)
-    result = await api.post(logical, path_suffix=uuid)
+    singular = _HAPROXY_RESOURCES[resource_type]
+    result = await api.post(f"haproxy.settings.del_{singular}", path_suffix=uuid)
     get_config_cache(ctx).invalidate()
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_haproxy_configtest(ctx: Context) -> dict[str, Any]:
-    """Validate HAProxy configuration syntax before applying.
+    """Validate HAProxy configuration syntax without applying it.
 
-    Use this BEFORE calling opn_reconfigure_haproxy to verify the configuration
-    is valid. This runs 'haproxy -c' internally and reports any syntax errors.
+    Runs 'haproxy -c' internally and reports any syntax errors.
+    opn_reconfigure_haproxy already runs this check automatically and refuses
+    to apply a broken config — call this directly when you want to validate
+    without applying yet.
 
-    Returns: dict with validation result (typically 'status' key).
+    Returns: dict with validation result (typically 'status'/'result' keys).
     """
     api = get_api(ctx)
     return await api.get("haproxy.service.configtest")
+
+
+@mcp.tool(annotations=WRITE)
+@catch_api_errors
+async def opn_reconfigure_haproxy(ctx: Context) -> dict[str, Any]:
+    """Validate, then apply pending HAProxy configuration changes.
+
+    Runs the configuration test first and REFUSES to reconfigure if the test
+    reports errors — a broken HAProxy config would take down every site behind
+    the reverse proxy. On a passing test, reconfigures the running service.
+
+    NOTE: No savepoint protection — HAProxy changes take effect immediately
+    once applied. Requires the HAProxy plugin (os-haproxy).
+    Returns: dict with 'status' and 'configtest' (the validation output).
+    On a failed test: 'error', 'error_type'='configtest', and 'configtest'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+
+    configtest = await api.get("haproxy.service.configtest")
+    if _configtest_failed(configtest):
+        return {
+            "error": "HAProxy configuration test failed — reconfigure refused. Fix the config first.",
+            "error_type": "configtest",
+            "configtest": configtest,
+        }
+
+    result = await api.post("haproxy.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+    return {
+        "status": result.get("status", "unknown"),
+        "service": "haproxy",
+        "configtest": configtest,
+    }
