@@ -209,6 +209,9 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "firewall/d_nat/delRule",
         "firewall/d_nat/del_rule",
     ),
+    # NAT apply (no rollback revision — the filter savepoint mechanism does
+    # NOT cover the d_nat model; see Filter.php rollback() in opnsense/core)
+    "nat.dnat.apply": ("firewall/d_nat/apply", "firewall/d_nat/apply"),
     # IPsec VPN
     "ipsec.sessions.phase1": (
         "ipsec/sessions/searchPhase1",

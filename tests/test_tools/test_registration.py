@@ -29,25 +29,15 @@ class TestToolRegistration:
             # Firewall
             "opn_list_firewall_rules",
             "opn_list_firewall_aliases",
+            "opn_list_nat_rules",
+            "opn_list_firewall_categories",
             "opn_firewall_log",
             "opn_confirm_changes",
-            "opn_toggle_firewall_rule",
-            "opn_add_firewall_rule",
-            "opn_delete_firewall_rule",
-            "opn_add_alias",
-            "opn_list_nat_rules",
-            "opn_add_nat_rule",
-            "opn_list_firewall_categories",
-            "opn_add_firewall_category",
-            "opn_delete_firewall_category",
-            "opn_set_rule_categories",
+            "opn_manage_firewall_rule",
+            "opn_manage_alias",
+            "opn_manage_nat_rule",
+            "opn_manage_firewall_category",
             "opn_add_icmpv6_rules",
-            "opn_update_alias",
-            "opn_delete_alias",
-            "opn_toggle_alias",
-            "opn_update_firewall_rule",
-            "opn_update_nat_rule",
-            "opn_delete_nat_rule",
             # DNS
             "opn_list_dns_overrides",
             "opn_list_dns_forwards",
@@ -111,4 +101,4 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 81, f"Expected 81 tools, got {len(tools)}"
+        assert len(tools) == 71, f"Expected 71 tools, got {len(tools)}"

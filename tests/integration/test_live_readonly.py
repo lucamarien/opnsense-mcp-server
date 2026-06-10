@@ -55,21 +55,17 @@ from opnsense_mcp.tools.dns import (
     opn_set_dnsbl,
 )
 from opnsense_mcp.tools.firewall import (
-    opn_add_alias,
-    opn_add_firewall_category,
-    opn_add_firewall_rule,
     opn_add_icmpv6_rules,
-    opn_add_nat_rule,
     opn_confirm_changes,
-    opn_delete_firewall_category,
-    opn_delete_firewall_rule,
     opn_firewall_log,
     opn_list_firewall_aliases,
     opn_list_firewall_categories,
     opn_list_firewall_rules,
     opn_list_nat_rules,
-    opn_set_rule_categories,
-    opn_toggle_firewall_rule,
+    opn_manage_alias,
+    opn_manage_firewall_category,
+    opn_manage_firewall_rule,
+    opn_manage_nat_rule,
 )
 from opnsense_mcp.tools.haproxy import opn_haproxy_status, opn_reconfigure_haproxy
 from opnsense_mcp.tools.network import (
@@ -355,23 +351,31 @@ async def main() -> int:
     # --- Write guard tests ---
     print("\n--- Write Guard Tests (must refuse) ---")
     write_tests = [
-        ("opn_toggle_firewall_rule", opn_toggle_firewall_rule(ctx, uuid="00000000-0000-0000-0000-000000000000")),
-        ("opn_add_firewall_rule", opn_add_firewall_rule(ctx, description="integration-test")),
-        ("opn_delete_firewall_rule", opn_delete_firewall_rule(ctx, uuid="00000000-0000-0000-0000-000000000000")),
+        (
+            "opn_manage_firewall_rule[toggle]",
+            opn_manage_firewall_rule(ctx, action="toggle", uuid="00000000-0000-0000-0000-000000000000"),
+        ),
+        ("opn_manage_firewall_rule[add]", opn_manage_firewall_rule(ctx, action="add", description="integration-test")),
+        (
+            "opn_manage_firewall_rule[delete]",
+            opn_manage_firewall_rule(ctx, action="delete", uuid="00000000-0000-0000-0000-000000000000"),
+        ),
         ("opn_confirm_changes", opn_confirm_changes(ctx, revision="fake-revision")),
-        ("opn_add_alias", opn_add_alias(ctx, name="integration_test")),
+        ("opn_manage_alias[add]", opn_manage_alias(ctx, action="add", name="integration_test")),
         ("opn_reconfigure_unbound", opn_reconfigure_unbound(ctx)),
         ("opn_reconfigure_haproxy", opn_reconfigure_haproxy(ctx)),
-        ("opn_add_nat_rule", opn_add_nat_rule(ctx, destination_port="9999", target_ip="192.168.1.1")),
-        ("opn_add_dns_override", opn_add_dns_override(ctx, hostname="test", domain="test.lan", server="192.168.1.1")),
-        ("opn_add_firewall_category", opn_add_firewall_category(ctx, name="integration_test")),
         (
-            "opn_delete_firewall_category",
-            opn_delete_firewall_category(ctx, uuid="00000000-0000-0000-0000-000000000000"),
+            "opn_manage_nat_rule[add]",
+            opn_manage_nat_rule(ctx, action="add", destination_port="9999", target_ip="192.168.1.1"),
+        ),
+        ("opn_add_dns_override", opn_add_dns_override(ctx, hostname="test", domain="test.lan", server="192.168.1.1")),
+        (
+            "opn_manage_firewall_category[add]",
+            opn_manage_firewall_category(ctx, action="add", name="integration_test"),
         ),
         (
-            "opn_set_rule_categories",
-            opn_set_rule_categories(ctx, uuid="00000000-0000-0000-0000-000000000000", categories=""),
+            "opn_manage_firewall_category[delete]",
+            opn_manage_firewall_category(ctx, action="delete", uuid="00000000-0000-0000-0000-000000000000"),
         ),
         ("opn_add_icmpv6_rules", opn_add_icmpv6_rules(ctx, interface="lan")),
         (
