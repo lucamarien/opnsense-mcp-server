@@ -1,13 +1,27 @@
-"""DNS tools — Unbound overrides, forward zones, statistics, DNSBL management."""
+"""DNS tools — Unbound overrides, forward zones, statistics, DNSBL management.
+
+Surface pattern: ``opn_list_*``/``opn_get_*`` for reads,
+``opn_manage_dns_override(action=...)`` and DNSBL tools for writes. DNS
+changes apply immediately (Unbound is reconfigured automatically) and are
+NOT savepoint-protected — they cannot be auto-reverted.
+"""
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from fastmcp import Context
 
 from opnsense_mcp.server import get_api, get_config_cache, mcp
+from opnsense_mcp.tools._util import (
+    DESTRUCTIVE,
+    READ_ONLY,
+    WRITE,
+    WRITE_IDEMPOTENT,
+    catch_api_errors,
+    clamp_limit,
+)
 
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$")
 _DOMAIN_RE = re.compile(
@@ -20,7 +34,8 @@ _IP_RE = re.compile(
 )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_list_dns_overrides(
     ctx: Context,
     search: str = "",
@@ -29,17 +44,19 @@ async def opn_list_dns_overrides(
     """List Unbound DNS host overrides (local DNS records).
 
     Use this when you need to see which hostnames are overridden to specific
-    IP addresses in the local DNS resolver.
+    IP addresses in the local DNS resolver, or to find a UUID for
+    opn_manage_dns_override.
     Returns: dict with 'rows' (list of overrides) and 'rowCount' (total).
     """
     api = get_api(ctx)
     return await api.post(
         "unbound.search_override",
-        {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
+        {"current": 1, "rowCount": clamp_limit(limit), "searchPhrase": search},
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_list_dns_forwards(
     ctx: Context,
     search: str = "",
@@ -54,11 +71,12 @@ async def opn_list_dns_forwards(
     api = get_api(ctx)
     return await api.post(
         "unbound.search_forward",
-        {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
+        {"current": 1, "rowCount": clamp_limit(limit), "searchPhrase": search},
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_dns_stats(ctx: Context) -> dict[str, Any]:
     """Get Unbound DNS resolver statistics (queries, cache hits, uptime).
 
@@ -70,16 +88,17 @@ async def opn_dns_stats(ctx: Context) -> dict[str, Any]:
     return await api.get("unbound.stats")
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE)
+@catch_api_errors
 async def opn_reconfigure_unbound(ctx: Context) -> dict[str, Any]:
     """Apply pending Unbound DNS resolver configuration changes.
 
-    Use this after making DNS configuration changes (adding overrides, forward
-    zones, etc.) to apply them to the running Unbound service. This restarts
-    Unbound with the new configuration.
+    Use this after making DNS configuration changes outside the MCP tools
+    (opn_manage_dns_override applies automatically). This restarts Unbound
+    with the new configuration.
 
-    NOTE: This does not use savepoint protection. DNS changes take effect
-    immediately and cannot be auto-reverted. Verify settings before calling.
+    NOTE: No savepoint protection — DNS changes take effect immediately and
+    cannot be auto-reverted. Verify settings before calling.
     Returns: dict with 'status' indicating success or failure.
     """
     api = get_api(ctx)
@@ -89,107 +108,101 @@ async def opn_reconfigure_unbound(ctx: Context) -> dict[str, Any]:
     return {"status": result.get("status", "unknown"), "service": "unbound"}
 
 
-@mcp.tool()
-async def opn_add_dns_override(
+@mcp.tool(annotations=DESTRUCTIVE)
+@catch_api_errors
+async def opn_manage_dns_override(
     ctx: Context,
-    hostname: str,
-    domain: str,
-    server: str,
-    description: str = "",
-) -> dict[str, Any]:
-    """Add an Unbound DNS host override (A/AAAA record) and apply immediately.
-
-    Use this when you need to create a local DNS record that resolves a hostname
-    to a specific IP address. Useful for split-horizon DNS, internal services,
-    or overriding external DNS for specific hosts.
-
-    Changes are applied immediately (Unbound is reconfigured automatically).
-    DNS overrides cannot be auto-reverted — verify settings before calling.
-    Use opn_list_dns_overrides to check existing overrides first.
-
-    Parameters:
-    - hostname: the hostname part (e.g. 'myserver')
-    - domain: the domain part (e.g. 'local.lan')
-    - server: the IP address to resolve to (IPv4 or IPv6)
-    - description: optional description
-
-    Returns: dict with 'result', 'uuid', 'hostname', 'server', and 'applied' status.
-    """
-    if not hostname or not _HOSTNAME_RE.match(hostname):
-        return {"error": f"Invalid hostname '{hostname}'. Must be alphanumeric with hyphens."}
-    if not domain or not _DOMAIN_RE.match(domain):
-        return {"error": f"Invalid domain '{domain}'. Must be a valid domain name."}
-    if not server or not _IP_RE.match(server):
-        return {"error": f"Invalid server IP '{server}'. Must be an IPv4 or IPv6 address."}
-
-    api = get_api(ctx)
-    api.require_writes()
-
-    result = await api.post(
-        "unbound.add_host_override",
-        {
-            "host": {
-                "hostname": hostname,
-                "domain": domain,
-                "server": server,
-                "description": description,
-                "enabled": "1",
-            },
-        },
-    )
-
-    reconfigure = await api.post("unbound.service.reconfigure")
-    get_config_cache(ctx).invalidate()
-
-    return {
-        "result": result.get("result", ""),
-        "uuid": result.get("uuid", ""),
-        "hostname": f"{hostname}.{domain}",
-        "server": server,
-        "applied": reconfigure.get("status", "unknown"),
-    }
-
-
-@mcp.tool()
-async def opn_update_dns_override(
-    ctx: Context,
-    uuid: str,
+    action: Literal["add", "update", "delete"],
+    uuid: str = "",
     hostname: str | None = None,
     domain: str | None = None,
     server: str | None = None,
     description: str | None = None,
     enabled: bool | None = None,
 ) -> dict[str, Any]:
-    """Update an Unbound DNS host override by UUID and apply immediately.
+    """Add, update, or delete an Unbound DNS host override (A/AAAA record).
 
-    Use this when you need to change the hostname, domain, IP address, or other
-    properties of a DNS override. Only the parameters you provide are changed;
-    all other settings are preserved.
+    Changes are applied immediately (Unbound is reconfigured automatically)
+    and CANNOT be auto-reverted — verify parameters before calling.
 
-    Changes are applied immediately (Unbound is reconfigured automatically).
-    DNS overrides cannot be auto-reverted — verify settings before calling.
-    Use opn_list_dns_overrides first to find the UUID.
+    Use this for split-horizon DNS, internal services, or overriding external
+    DNS for specific hosts.
+
+    Actions:
+    - 'add': create an override. Requires hostname, domain, and server.
+    - 'update': modify the override identified by uuid. Only provided
+      parameters change.
+    - 'delete': remove the override identified by uuid.
 
     Parameters:
-    - uuid: override UUID (from opn_list_dns_overrides)
-    - hostname: new hostname part (e.g. 'myserver')
-    - domain: new domain part (e.g. 'local.lan')
-    - server: new IP address (IPv4 or IPv6)
-    - description: new description
+    - hostname: the hostname part (e.g. 'myserver')
+    - domain: the domain part (e.g. 'local.lan')
+    - server: the IP address to resolve to (IPv4 → A record, IPv6 → AAAA)
+    - description: optional description
     - enabled: enable/disable the override
 
-    Returns: dict with 'result' (str), 'uuid' (str), and 'applied' status.
+    Use opn_list_dns_overrides first to find UUIDs.
+    Returns: dict with 'result', 'uuid', and 'applied' (Unbound reconfigure
+    status). On failure: 'error' and 'error_type'.
     """
+    if action in ("update", "delete") and not uuid:
+        return {"error": f"uuid is required for action '{action}'", "error_type": "validation"}
     if hostname is not None and not _HOSTNAME_RE.match(hostname):
-        return {"error": f"Invalid hostname '{hostname}'. Must be alphanumeric with hyphens."}
+        return {
+            "error": f"Invalid hostname '{hostname}'. Must be alphanumeric with hyphens.",
+            "error_type": "validation",
+        }
     if domain is not None and not _DOMAIN_RE.match(domain):
-        return {"error": f"Invalid domain '{domain}'. Must be a valid domain name."}
+        return {"error": f"Invalid domain '{domain}'. Must be a valid domain name.", "error_type": "validation"}
     if server is not None and not _IP_RE.match(server):
-        return {"error": f"Invalid server IP '{server}'. Must be an IPv4 or IPv6 address."}
+        return {
+            "error": f"Invalid server IP '{server}'. Must be an IPv4 or IPv6 address.",
+            "error_type": "validation",
+        }
 
     api = get_api(ctx)
     api.require_writes()
 
+    if action == "delete":
+        result = await api.post("unbound.del_host_override", path_suffix=uuid)
+        reconfigure = await api.post("unbound.service.reconfigure")
+        get_config_cache(ctx).invalidate()
+        return {
+            "result": result.get("result", ""),
+            "uuid": uuid,
+            "applied": reconfigure.get("status", "unknown"),
+        }
+
+    if action == "add":
+        missing = [n for n, v in (("hostname", hostname), ("domain", domain), ("server", server)) if not v]
+        if missing:
+            return {
+                "error": f"Required for action 'add': {', '.join(missing)}",
+                "error_type": "validation",
+            }
+        result = await api.post(
+            "unbound.add_host_override",
+            {
+                "host": {
+                    "hostname": hostname,
+                    "domain": domain,
+                    "server": server,
+                    "description": description or "",
+                    "enabled": "1" if enabled is None or enabled else "0",
+                },
+            },
+        )
+        reconfigure = await api.post("unbound.service.reconfigure")
+        get_config_cache(ctx).invalidate()
+        return {
+            "result": result.get("result", ""),
+            "uuid": result.get("uuid", ""),
+            "hostname": f"{hostname}.{domain}",
+            "server": server,
+            "applied": reconfigure.get("status", "unknown"),
+        }
+
+    # update — send only provided fields
     host: dict[str, str] = {}
     if hostname is not None:
         host["hostname"] = hostname
@@ -205,32 +218,6 @@ async def opn_update_dns_override(
     result = await api.post("unbound.set_host_override", {"host": host}, path_suffix=uuid)
     reconfigure = await api.post("unbound.service.reconfigure")
     get_config_cache(ctx).invalidate()
-
-    return {
-        "result": result.get("result", ""),
-        "uuid": uuid,
-        "applied": reconfigure.get("status", "unknown"),
-    }
-
-
-@mcp.tool()
-async def opn_delete_dns_override(
-    ctx: Context,
-    uuid: str,
-) -> dict[str, Any]:
-    """Delete an Unbound DNS host override by UUID and apply immediately.
-
-    The deletion is applied immediately (Unbound is reconfigured automatically).
-    DNS changes cannot be auto-reverted — verify the UUID before calling.
-    Use opn_list_dns_overrides first to find the UUID.
-    Returns: dict with 'result' (str), 'uuid' (str), and 'applied' status.
-    """
-    api = get_api(ctx)
-    api.require_writes()
-    result = await api.post("unbound.del_host_override", path_suffix=uuid)
-    reconfigure = await api.post("unbound.service.reconfigure")
-    get_config_cache(ctx).invalidate()
-
     return {
         "result": result.get("result", ""),
         "uuid": uuid,
@@ -284,7 +271,8 @@ async def _apply_dnsbl(ctx: Context) -> dict[str, str]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_list_dnsbl(
     ctx: Context,
     search: str = "",
@@ -300,11 +288,12 @@ async def opn_list_dnsbl(
     api = get_api(ctx)
     return await api.post(
         "unbound.search_dnsbl",
-        {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
+        {"current": 1, "rowCount": clamp_limit(limit), "searchPhrase": search},
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
 async def opn_get_dnsbl(
     ctx: Context,
     uuid: str,
@@ -356,7 +345,8 @@ async def opn_get_dnsbl(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+@catch_api_errors
 async def opn_set_dnsbl(
     ctx: Context,
     uuid: str,
@@ -375,7 +365,10 @@ async def opn_set_dnsbl(
 
     Use this when you need to change DNSBL settings — providers, allowlists,
     blocklists, etc. Only the parameters you provide are changed; all other
-    settings are preserved. Changes are applied immediately.
+    settings are preserved. Changes are applied immediately (no auto-revert).
+
+    To add/remove individual allowlist entries without rewriting the whole
+    list, prefer opn_edit_dnsbl_allowlist.
 
     Get the UUID from opn_list_dnsbl first.
 
@@ -384,9 +377,9 @@ async def opn_set_dnsbl(
     - enabled: enable/disable this blocklist
     - providers: comma-separated provider shortcodes (e.g. 'hgz002,hgz011,ag')
     - custom_urls: newline-separated custom blocklist URLs
-    - allowlists: newline-separated allowlist entries (domains or regex patterns)
-    - blocklists: newline-separated custom block domains
-    - wildcards: newline-separated wildcard block domains
+    - allowlists: newline-separated allowlist entries (REPLACES the list)
+    - blocklists: newline-separated custom block domains (REPLACES the list)
+    - wildcards: newline-separated wildcard block domains (REPLACES the list)
     - source_nets: comma-separated source networks (empty = all)
     - nxdomain: return NXDOMAIN instead of 0.0.0.0 for blocked domains
     - cache_ttl: cache TTL in seconds for DNSBL responses
@@ -434,49 +427,57 @@ async def opn_set_dnsbl(
     }
 
 
-@mcp.tool()
-async def opn_add_dnsbl_allowlist(
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+@catch_api_errors
+async def opn_edit_dnsbl_allowlist(
     ctx: Context,
     uuid: str,
-    domains: str,
+    add_domains: str = "",
+    remove_domains: str = "",
 ) -> dict[str, Any]:
-    """Add domains to a DNSBL allowlist (whitelist) without overwriting existing entries.
+    """Add and/or remove domains on a DNSBL allowlist without replacing it.
 
-    Use this when a domain is blocked by DNSBL and you need to allowlist it
-    (e.g. googleads.g.doubleclick.net blocking YouTube). Existing allowlist
-    entries are preserved. Changes are applied immediately.
+    Use this when a domain is wrongly blocked by DNSBL and you need to
+    allowlist it (e.g. googleads.g.doubleclick.net blocking YouTube), or to
+    re-enable blocking for a previously allowlisted domain. Existing entries
+    are preserved. Changes are applied immediately.
 
     Get the UUID from opn_list_dnsbl first.
 
     Parameters:
     - uuid: blocklist UUID from opn_list_dnsbl
-    - domains: domains to add, comma or newline-separated
+    - add_domains: domains to add, comma or newline-separated
+    - remove_domains: domains to remove, comma or newline-separated
 
-    Returns: dict with 'added' (list), 'already_present' (list),
-    'dnsbl_status', and 'service_status'.
+    Returns: dict with 'added', 'already_present', 'removed', 'not_found'
+    (lists), 'dnsbl_status', and 'service_status'.
     """
-    if not domains.strip():
-        return {"error": "No domains provided."}
+    if not add_domains.strip() and not remove_domains.strip():
+        return {"error": "Provide add_domains and/or remove_domains.", "error_type": "validation"}
 
     api = get_api(ctx)
     api.require_writes()
 
-    # Parse input domains
-    new_domains = [d.strip() for d in domains.replace(",", "\n").split("\n") if d.strip()]
+    def _parse(domains: str) -> list[str]:
+        return [d.strip() for d in domains.replace(",", "\n").split("\n") if d.strip()]
+
+    to_add = _parse(add_domains)
+    to_remove = _parse(remove_domains)
 
     # Read current config
     raw = await api.get("unbound.get_dnsbl", path_suffix=uuid)
     form = raw.get("blocklist", {})
     current = _extract_dnsbl_values(form)
 
-    # Parse existing allowlist
     existing = set(current.get("allowlists", "").split("\n"))
     existing.discard("")
 
-    # Merge
-    added = [d for d in new_domains if d not in existing]
-    already_present = [d for d in new_domains if d in existing]
-    merged = sorted(existing | set(new_domains))
+    added = [d for d in to_add if d not in existing]
+    already_present = [d for d in to_add if d in existing]
+    removed = [d for d in to_remove if d in existing]
+    not_found = [d for d in to_remove if d not in existing]
+
+    merged = sorted((existing | set(to_add)) - set(to_remove))
     current["allowlists"] = "\n".join(merged)
 
     # Write + apply (regenerate blocklists and restart Unbound)
@@ -487,78 +488,26 @@ async def opn_add_dnsbl_allowlist(
         "result": result.get("result", ""),
         "added": added,
         "already_present": already_present,
-        **apply,
-    }
-
-
-@mcp.tool()
-async def opn_remove_dnsbl_allowlist(
-    ctx: Context,
-    uuid: str,
-    domains: str,
-) -> dict[str, Any]:
-    """Remove domains from a DNSBL allowlist.
-
-    Use this when you no longer need a domain allowlisted and want to re-enable
-    DNSBL blocking for it. Changes are applied immediately.
-
-    Get the UUID from opn_list_dnsbl first.
-
-    Parameters:
-    - uuid: blocklist UUID from opn_list_dnsbl
-    - domains: domains to remove, comma or newline-separated
-
-    Returns: dict with 'removed' (list), 'not_found' (list),
-    'dnsbl_status', and 'service_status'.
-    """
-    if not domains.strip():
-        return {"error": "No domains provided."}
-
-    api = get_api(ctx)
-    api.require_writes()
-
-    # Parse input domains
-    remove_domains = [d.strip() for d in domains.replace(",", "\n").split("\n") if d.strip()]
-
-    # Read current config
-    raw = await api.get("unbound.get_dnsbl", path_suffix=uuid)
-    form = raw.get("blocklist", {})
-    current = _extract_dnsbl_values(form)
-
-    # Parse existing allowlist
-    existing = set(current.get("allowlists", "").split("\n"))
-    existing.discard("")
-
-    # Remove
-    removed = [d for d in remove_domains if d in existing]
-    not_found = [d for d in remove_domains if d not in existing]
-    remaining = sorted(existing - set(remove_domains))
-    current["allowlists"] = "\n".join(remaining)
-
-    # Write + apply (regenerate blocklists and restart Unbound)
-    result = await api.post("unbound.set_dnsbl", {"blocklist": current}, path_suffix=uuid)
-    apply = await _apply_dnsbl(ctx)
-
-    return {
-        "result": result.get("result", ""),
         "removed": removed,
         "not_found": not_found,
         **apply,
     }
 
 
-@mcp.tool()
-async def opn_update_dnsbl(ctx: Context) -> dict[str, Any]:
+@mcp.tool(annotations=WRITE_IDEMPOTENT)
+@catch_api_errors
+async def opn_apply_dnsbl(ctx: Context) -> dict[str, Any]:
     """Reload DNSBL blocklist files and restart Unbound to apply them.
 
-    Use this when DNSBL lists need to be refreshed without changing the
-    configuration — for example after a service restart that lost loaded
-    lists, or to force Unbound to pick up previously generated blocklist
-    files. This flushes the DNS cache, so previously cached blocked
-    (or unblocked) domains will be re-evaluated.
+    This does NOT change configuration — use it to refresh blocklists after
+    a service restart that lost loaded lists, or to force Unbound to pick up
+    previously generated blocklist files. Flushes the DNS cache, so cached
+    blocked (or unblocked) domains are re-evaluated.
 
-    NOTE: This does not use savepoint protection. DNS changes take effect
-    immediately and cannot be auto-reverted.
+    To change DNSBL settings, use opn_set_dnsbl or opn_edit_dnsbl_allowlist
+    (both apply automatically — calling this afterwards is unnecessary).
+
+    NOTE: No savepoint protection; takes effect immediately.
     Returns: dict with 'dnsbl_status' and 'service_status'.
     """
     api = get_api(ctx)

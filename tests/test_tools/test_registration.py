@@ -43,16 +43,13 @@ class TestToolRegistration:
             "opn_list_dns_forwards",
             "opn_dns_stats",
             "opn_reconfigure_unbound",
-            "opn_add_dns_override",
-            "opn_update_dns_override",
-            "opn_delete_dns_override",
+            "opn_manage_dns_override",
             # DNSBL
             "opn_list_dnsbl",
             "opn_get_dnsbl",
             "opn_set_dnsbl",
-            "opn_add_dnsbl_allowlist",
-            "opn_remove_dnsbl_allowlist",
-            "opn_update_dnsbl",
+            "opn_edit_dnsbl_allowlist",
+            "opn_apply_dnsbl",
             # DHCP
             "opn_list_dhcp_leases",
             "opn_list_kea_leases",
@@ -101,4 +98,4 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 71, f"Expected 71 tools, got {len(tools)}"
+        assert len(tools) == 68, f"Expected 68 tools, got {len(tools)}"

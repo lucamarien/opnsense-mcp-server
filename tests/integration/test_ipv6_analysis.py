@@ -376,7 +376,7 @@ async def main() -> int:
         else:
             readiness["IPv6 DNS (AAAA)"] = "NONE"
             recommendations.append(
-                "No AAAA DNS overrides found. Add IPv6 DNS records with opn_add_dns_override for internal hosts."
+                "No AAAA DNS overrides found. Add IPv6 DNS records with opn_manage_dns_override for internal hosts."
             )
     else:
         print(f"  [{FAIL}] {dns_result}")

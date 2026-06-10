@@ -43,15 +43,14 @@ from opnsense_mcp.tools.diagnostics import (
     opn_traceroute,
 )
 from opnsense_mcp.tools.dns import (
-    opn_add_dns_override,
-    opn_add_dnsbl_allowlist,
     opn_dns_stats,
+    opn_edit_dnsbl_allowlist,
     opn_get_dnsbl,
     opn_list_dns_forwards,
     opn_list_dns_overrides,
     opn_list_dnsbl,
+    opn_manage_dns_override,
     opn_reconfigure_unbound,
-    opn_remove_dnsbl_allowlist,
     opn_set_dnsbl,
 )
 from opnsense_mcp.tools.firewall import (
@@ -368,7 +367,10 @@ async def main() -> int:
             "opn_manage_nat_rule[add]",
             opn_manage_nat_rule(ctx, action="add", destination_port="9999", target_ip="192.168.1.1"),
         ),
-        ("opn_add_dns_override", opn_add_dns_override(ctx, hostname="test", domain="test.lan", server="192.168.1.1")),
+        (
+            "opn_manage_dns_override[add]",
+            opn_manage_dns_override(ctx, action="add", hostname="test", domain="test.lan", server="192.168.1.1"),
+        ),
         (
             "opn_manage_firewall_category[add]",
             opn_manage_firewall_category(ctx, action="add", name="integration_test"),
@@ -383,12 +385,14 @@ async def main() -> int:
             opn_set_dnsbl(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", enabled=True),
         ),
         (
-            "opn_add_dnsbl_allowlist",
-            opn_add_dnsbl_allowlist(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", domains="test.example.com"),
+            "opn_edit_dnsbl_allowlist[add]",
+            opn_edit_dnsbl_allowlist(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", add_domains="test.example.com"),
         ),
         (
-            "opn_remove_dnsbl_allowlist",
-            opn_remove_dnsbl_allowlist(ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", domains="test.example.com"),
+            "opn_edit_dnsbl_allowlist[remove]",
+            opn_edit_dnsbl_allowlist(
+                ctx, uuid="7aafe899-6392-4a05-8205-565919b17f02", remove_domains="test.example.com"
+            ),
         ),
     ]
     for name, coro in write_tests:

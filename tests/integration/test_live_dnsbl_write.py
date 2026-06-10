@@ -27,10 +27,9 @@ from opnsense_mcp.api_client import OPNsenseAPI, SavepointManager
 from opnsense_mcp.config import load_config
 from opnsense_mcp.config_cache import ConfigCache
 from opnsense_mcp.tools.dns import (
-    opn_add_dnsbl_allowlist,
+    opn_edit_dnsbl_allowlist,
     opn_get_dnsbl,
     opn_list_dnsbl,
-    opn_remove_dnsbl_allowlist,
     opn_set_dnsbl,
 )
 
@@ -104,9 +103,9 @@ async def main() -> int:
 
         # --- Step 3: Add allowlist domain ---
         print("\n--- Step 3: Add allowlist domain ---")
-        add_result = await opn_add_dnsbl_allowlist(ctx, uuid=uuid, domains=TEST_DOMAIN)
+        add_result = await opn_edit_dnsbl_allowlist(ctx, uuid=uuid, add_domains=TEST_DOMAIN)
         _check(
-            "opn_add_dnsbl_allowlist succeeds",
+            "opn_edit_dnsbl_allowlist add succeeds",
             "error" not in add_result,
             f"result={add_result.get('result', '?')}",
         )
@@ -137,7 +136,7 @@ async def main() -> int:
 
         # --- Step 5: Add again (idempotency) ---
         print("\n--- Step 5: Add same domain again (idempotency) ---")
-        add2_result = await opn_add_dnsbl_allowlist(ctx, uuid=uuid, domains=TEST_DOMAIN)
+        add2_result = await opn_edit_dnsbl_allowlist(ctx, uuid=uuid, add_domains=TEST_DOMAIN)
         _check(
             "domain reported as already_present",
             TEST_DOMAIN in add2_result.get("already_present", []),
@@ -150,9 +149,9 @@ async def main() -> int:
 
         # --- Step 6: Remove allowlist domain ---
         print("\n--- Step 6: Remove allowlist domain ---")
-        remove_result = await opn_remove_dnsbl_allowlist(ctx, uuid=uuid, domains=TEST_DOMAIN)
+        remove_result = await opn_edit_dnsbl_allowlist(ctx, uuid=uuid, remove_domains=TEST_DOMAIN)
         _check(
-            "opn_remove_dnsbl_allowlist succeeds",
+            "opn_edit_dnsbl_allowlist remove succeeds",
             "error" not in remove_result,
             f"result={remove_result.get('result', '?')}",
         )
@@ -173,7 +172,7 @@ async def main() -> int:
 
         # --- Step 8: Remove again (not found) ---
         print("\n--- Step 8: Remove same domain again (not found) ---")
-        remove2_result = await opn_remove_dnsbl_allowlist(ctx, uuid=uuid, domains=TEST_DOMAIN)
+        remove2_result = await opn_edit_dnsbl_allowlist(ctx, uuid=uuid, remove_domains=TEST_DOMAIN)
         _check(
             "domain reported as not_found",
             TEST_DOMAIN in remove2_result.get("not_found", []),
