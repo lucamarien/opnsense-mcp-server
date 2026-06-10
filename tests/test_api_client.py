@@ -544,3 +544,107 @@ class TestSavepointManager:
         result = await mgr.confirm(revision)
         assert result == {"status": "confirmed"}
         assert mgr.active_revision is None
+
+
+class TestForcedApiStyle:
+    """Tests for OPNSENSE_API_STYLE forced endpoint style (skips detection)."""
+
+    def _make_api(self, style: str) -> OPNsenseAPI:
+        from opnsense_mcp.config import OPNsenseConfig
+
+        config = OPNsenseConfig(
+            url="https://10.0.0.1/api",
+            api_key="k",
+            api_secret="s",
+            verify_ssl=False,
+            allow_writes=False,
+            api_style=style,
+        )
+        api = OPNsenseAPI(config)
+        api._client = AsyncMock()
+        return api
+
+    async def test_snake_forced_skips_detection(self, mock_httpx_client):
+        api = self._make_api("snake")
+        api._client = mock_httpx_client
+        mock_httpx_client.get.return_value.json.return_value = {"rows": []}
+        await api.get("interface.arp")
+        # Only one GET: the endpoint itself, no firmware/status detection call
+        assert mock_httpx_client.get.call_count == 1
+        mock_httpx_client.get.assert_called_once_with("/diagnostics/interface/get_arp")
+
+    async def test_camel_forced_skips_detection(self, mock_httpx_client):
+        api = self._make_api("camel")
+        api._client = mock_httpx_client
+        mock_httpx_client.get.return_value.json.return_value = {"rows": []}
+        await api.get("interface.arp")
+        assert mock_httpx_client.get.call_count == 1
+        mock_httpx_client.get.assert_called_once_with("/diagnostics/interface/getArp")
+
+    async def test_auto_still_detects(self, mock_config, mock_httpx_client, firmware_status_25_7):
+        api = OPNsenseAPI(mock_config)
+        api._client = mock_httpx_client
+        mock_httpx_client.get.return_value.json.return_value = firmware_status_25_7
+        await api.get("interface.arp")
+        # Two GETs: detection + endpoint
+        assert mock_httpx_client.get.call_count == 2
+
+    async def test_detection_failure_mentions_override(self, mock_config, mock_httpx_client):
+        api = OPNsenseAPI(mock_config)
+        api._client = mock_httpx_client
+        mock_httpx_client.get.return_value.status_code = 403
+        with pytest.raises(OPNsenseAPIError, match="OPNSENSE_API_STYLE"):
+            await api.get("interface.arp")
+
+
+class TestSavepointOverlapGuard:
+    """Tests for the pending-savepoint guard in SavepointManager.create()."""
+
+    async def test_create_refused_while_pending(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-1"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        await mgr.apply("rev-1")
+        with pytest.raises(SavepointError, match="pending"):
+            await mgr.create()
+
+    async def test_create_allowed_after_window(self, mock_api_writes, monkeypatch):
+        import time as time_mod
+
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-1"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        await mgr.apply("rev-1")
+
+        # Pretend the apply happened 80 seconds ago
+        assert mgr._applied_at is not None
+        mgr._applied_at = time_mod.monotonic() - 80.0
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-2"})
+        revision = await mgr.create()
+        assert revision == "rev-2"
+
+    async def test_create_allowed_after_confirm(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-1"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        await mgr.apply("rev-1")
+        await mgr.confirm("rev-1")
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-2"})
+        revision = await mgr.create()
+        assert revision == "rev-2"
+
+    async def test_create_allowed_when_never_applied(self, mock_api_writes):
+        # A savepoint that was created but whose change failed (never applied)
+        # must not block the next attempt.
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-1"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-2"})
+        revision = await mgr.create()
+        assert revision == "rev-2"
+
+    async def test_apply_unknown_revision_does_not_start_window(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(return_value={"status": "ok"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.apply("rev-foreign")
+        assert mgr._applied_at is None

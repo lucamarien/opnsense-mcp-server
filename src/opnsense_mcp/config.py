@@ -12,6 +12,9 @@ Environment variables:
     OPNSENSE_ALLOW_SENSITIVE: Permit include_sensitive=true on config
         tools (default: false). Without this, passwords/keys are always
         redacted regardless of tool parameters.
+    OPNSENSE_API_STYLE: 'auto' (default), 'camel', or 'snake'. Forces the
+        API endpoint naming style and skips version detection — useful for
+        API users whose key lacks the firmware/status privilege.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ class OPNsenseConfig:
     verify_ssl: bool
     allow_writes: bool
     allow_sensitive: bool = False
+    api_style: str = "auto"
 
     def __repr__(self) -> str:
         return f"OPNsenseConfig(url={self.url!r}, verify_ssl={self.verify_ssl}, allow_writes={self.allow_writes})"
@@ -93,6 +97,11 @@ def load_config() -> OPNsenseConfig:
     allow_sensitive_raw = os.environ.get("OPNSENSE_ALLOW_SENSITIVE", "false").strip()
     allow_sensitive = _parse_bool(allow_sensitive_raw, "OPNSENSE_ALLOW_SENSITIVE")
 
+    api_style = os.environ.get("OPNSENSE_API_STYLE", "auto").strip().lower()
+    if api_style not in ("auto", "camel", "snake"):
+        msg = f"OPNSENSE_API_STYLE must be 'auto', 'camel', or 'snake' (got {api_style!r})"
+        raise ConfigError(msg)
+
     if url.startswith("http://") and not allow_http:
         msg = (
             "OPNSENSE_URL uses http:// — API credentials would be sent in cleartext. "
@@ -110,4 +119,5 @@ def load_config() -> OPNsenseConfig:
         verify_ssl=verify_ssl,
         allow_writes=allow_writes,
         allow_sensitive=allow_sensitive,
+        api_style=api_style,
     )

@@ -6,6 +6,7 @@ endpoint blocklist, and error response parsing.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
@@ -432,7 +433,9 @@ class OPNsenseAPI:
             follow_redirects=True,
         )
         self._detected_version: tuple[int, int] | None = None
-        self._use_snake_case: bool = False
+        self._use_snake_case: bool = config.api_style == "snake"
+        # 'camel'/'snake' force the endpoint style and skip version detection
+        self._style_forced: bool = config.api_style in ("camel", "snake")
 
     def require_writes(self) -> None:
         """Raise if write operations are disabled.
@@ -581,8 +584,13 @@ class OPNsenseAPI:
         return result
 
     async def _ensure_version_detected(self) -> None:
-        """Detect OPNsense version on first call (lazy, cached)."""
-        if self._detected_version is not None:
+        """Detect OPNsense version on first call (lazy, cached).
+
+        Skipped entirely when OPNSENSE_API_STYLE forces an endpoint style —
+        this lets API users without the firmware/status privilege use the
+        server.
+        """
+        if self._style_forced or self._detected_version is not None:
             return
 
         path = ENDPOINT_REGISTRY["firmware.status"][0]
@@ -595,7 +603,11 @@ class OPNsenseAPI:
             raise OPNsenseAPIError(msg) from exc
 
         if response.status_code >= 400:
-            msg = f"Version detection failed: HTTP {response.status_code}"
+            msg = (
+                f"Version detection failed: HTTP {response.status_code}. "
+                "If this API user lacks the firmware/status privilege, set "
+                "OPNSENSE_API_STYLE=snake (25.7+) or camel (older) to skip detection."
+            )
             raise OPNsenseAPIError(msg, status_code=response.status_code)
 
         try:
@@ -671,21 +683,44 @@ class SavepointManager:
     Flow: create() → [make changes] → apply() → confirm() or auto-revert.
     """
 
+    # OPNsense auto-reverts unconfirmed changes after 60 s; allow slack
+    # before permitting a new savepoint on top of a pending one.
+    PENDING_WINDOW_SECONDS: float = 75.0
+
     def __init__(self, api: OPNsenseAPI) -> None:
         self._api = api
         self._active_revision: str | None = None
+        self._applied_at: float | None = None
 
     async def create(self) -> str:
         """Create a firewall savepoint.
+
+        Refuses to create a new savepoint while a previously applied one is
+        still inside its 60-second confirmation window — OPNsense's behavior
+        with overlapping savepoints is undefined, and an unconfirmed earlier
+        revision could revert later changes along with its own.
 
         Returns:
             The revision UUID for this savepoint.
 
         Raises:
             WriteDisabledError: If writes are disabled.
-            SavepointError: If the API returns no revision.
+            SavepointError: If the API returns no revision, or a previous
+                savepoint is still pending confirmation.
         """
         self._api.require_writes()
+        if self._active_revision is not None and self._applied_at is not None:
+            elapsed = time.monotonic() - self._applied_at
+            if elapsed < self.PENDING_WINDOW_SECONDS:
+                msg = (
+                    f"Savepoint '{self._active_revision}' was applied {elapsed:.0f}s ago and is "
+                    "still pending. Confirm it with opn_confirm_changes, or wait for the "
+                    "60-second auto-revert before making another change."
+                )
+                raise SavepointError(msg)
+            # Window passed — the old revision auto-reverted; forget it.
+            self._active_revision = None
+            self._applied_at = None
         result = await self._api.post("firewall.savepoint")
         revision = result.get("revision", "")
         if not isinstance(revision, str) or not revision:
@@ -707,7 +742,10 @@ class SavepointManager:
             WriteDisabledError: If writes are disabled.
         """
         self._api.require_writes()
-        return await self._api.post("firewall.apply", path_suffix=revision)
+        result = await self._api.post("firewall.apply", path_suffix=revision)
+        if self._active_revision == revision:
+            self._applied_at = time.monotonic()
+        return result
 
     async def confirm(self, revision: str) -> dict[str, Any]:
         """Cancel auto-rollback, making changes permanent.
@@ -725,6 +763,7 @@ class SavepointManager:
         result = await self._api.post("firewall.cancel_rollback", path_suffix=revision)
         if self._active_revision == revision:
             self._active_revision = None
+            self._applied_at = None
         return result
 
     @property
