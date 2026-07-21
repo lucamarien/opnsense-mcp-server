@@ -8,6 +8,7 @@ from typing import Any
 from fastmcp import Context
 
 from opnsense_mcp import __version__
+from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.config_cache import SENSITIVE_TAGS
 from opnsense_mcp.server import get_api, get_config_cache, mcp
 
@@ -159,15 +160,27 @@ async def opn_mcp_info(ctx: Context) -> dict[str, Any]:
     """Get MCP server version and runtime configuration.
 
     Use this to check the MCP server version, whether write mode is enabled,
-    and the detected OPNsense API version.
+    and the detected OPNsense API version. Version detection is normally lazy
+    (it only fires on the first real API call), so this triggers it explicitly
+    to avoid reporting a stale/null version on a fresh server. If the firewall
+    is unreachable, detection failure is reported rather than raised.
     Returns: dict with 'mcp_version', 'write_mode', 'opnsense_version',
-    and 'api_style'.
+    'api_style', and (only on detection failure) 'version_detection_error'.
     """
     api = get_api(ctx)
+    version_detection_error: str | None = None
+    try:
+        await api._ensure_version_detected()
+    except OPNsenseAPIError as exc:
+        version_detection_error = str(exc)
+
     version = api._detected_version
-    return {
+    result: dict[str, Any] = {
         "mcp_version": __version__,
         "write_mode": api._config.allow_writes,
         "opnsense_version": f"{version[0]}.{version[1]}" if version else None,
         "api_style": "snake_case" if api._use_snake_case else "camelCase",
     }
+    if version_detection_error is not None:
+        result["version_detection_error"] = version_detection_error
+    return result

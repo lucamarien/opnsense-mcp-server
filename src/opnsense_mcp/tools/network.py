@@ -10,6 +10,19 @@ from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.server import get_api, mcp
 
 
+def _normalize_table_result(result: dict[str, Any] | list[Any]) -> dict[str, Any]:
+    """Normalize an ARP/NDP API result into {'entries': [...], 'count': N}.
+
+    OPNsense returns these tables as a bare JSON array. FastMCP's
+    structured_content requires a dict, so a bare list is wrapped. Some
+    builds already nest the rows in a dict (e.g. {'rows': [...]}) — in that
+    case the dict is passed through unchanged rather than double-wrapped.
+    """
+    if isinstance(result, list):
+        return {"entries": result, "count": len(result)}
+    return result
+
+
 @mcp.tool()
 async def opn_interface_stats(ctx: Context) -> dict[str, Any]:
     """Get per-interface traffic statistics (bytes in/out, packets, errors).
@@ -28,10 +41,14 @@ async def opn_arp_table(ctx: Context) -> dict[str, Any]:
 
     Use this when you need to find which MAC address is associated with an IP,
     identify devices on a network segment, or troubleshoot connectivity.
-    Returns: dict with ARP entries including ip, mac, intf, and hostname fields.
+    Returns: dict with 'entries' (list of ARP rows with ip, mac, intf, and
+    hostname fields) and 'count' (int). If the OPNsense API already returns a
+    dict (some builds nest rows, e.g. under 'rows'), it is passed through
+    unchanged rather than double-wrapped.
     """
     api = get_api(ctx)
-    return await api.get("interface.arp")
+    result = await api.get("interface.arp")
+    return _normalize_table_result(result)
 
 
 @mcp.tool()
@@ -41,10 +58,14 @@ async def opn_ndp_table(ctx: Context) -> dict[str, Any]:
     Use this when you need to find which MAC address is associated with an IPv6
     address, identify IPv6-enabled devices on a network segment, or troubleshoot
     IPv6 neighbor reachability. This is the IPv6 equivalent of the ARP table.
-    Returns: dict with NDP entries including ip, mac, intf, and manufacturer fields.
+    Returns: dict with 'entries' (list of NDP rows with ip, mac, intf, and
+    manufacturer fields) and 'count' (int). If the OPNsense API already
+    returns a dict (some builds nest rows, e.g. under 'rows'), it is passed
+    through unchanged rather than double-wrapped.
     """
     api = get_api(ctx)
-    return await api.get("interface.ndp")
+    result = await api.get("interface.ndp")
+    return _normalize_table_result(result)
 
 
 @mcp.tool()
