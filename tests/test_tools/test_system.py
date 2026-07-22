@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from opnsense_mcp.api_client import OPNsenseAPIError
+import httpx
+
+from opnsense_mcp.api_client import OPNsenseAPI, OPNsenseAPIError
 from opnsense_mcp.tools.system import (
     opn_download_config,
     opn_gateway_status,
@@ -308,10 +310,11 @@ class TestOpnMcpInfo:
         result = await opn_mcp_info(mock_ctx)
         assert result["opnsense_version"] == "25.1"
 
-    async def test_opnsense_version_not_detected(self, mock_api, mock_ctx):
-        mock_api._detected_version = None
+    async def test_opnsense_version_already_cached_skips_http_call(self, mock_api, mock_ctx):
+        """Version already detected (the common case) — no extra HTTP round-trip."""
         result = await opn_mcp_info(mock_ctx)
-        assert result["opnsense_version"] is None
+        assert result["opnsense_version"] == "25.1"
+        mock_api._client.get.assert_not_called()
 
     async def test_api_style_camelcase(self, mock_api, mock_ctx):
         result = await opn_mcp_info(mock_ctx)
@@ -321,3 +324,45 @@ class TestOpnMcpInfo:
         mock_api._use_snake_case = True
         result = await opn_mcp_info(mock_ctx)
         assert result["api_style"] == "snake_case"
+
+    async def test_triggers_lazy_detection_on_fresh_server(self, mock_config, mock_config_cache):
+        """Regression test: on a fresh server (no API call made yet),
+        opn_mcp_info must trigger detection itself rather than reading a
+        never-populated _detected_version.
+        """
+        api = OPNsenseAPI(mock_config)
+        api._client = AsyncMock()
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"product_version": "24.7.1", "product_name": "OPNsense"}
+        api._client.get.return_value = response
+        ctx = MagicMock()
+        ctx.lifespan_context = {"api": api, "config_cache": mock_config_cache}
+
+        result = await opn_mcp_info(ctx)
+
+        assert result["opnsense_version"] == "24.7"
+        assert result["api_style"] == "camelCase"
+        assert "version_detection_error" not in result
+
+    async def test_version_detection_failure_reports_error_field(self, mock_api, mock_ctx):
+        """If the box is unreachable, detection failure must be reported in the
+        response, not raised — opnsense_version stays None."""
+        mock_api._detected_version = None
+        mock_api._client.get.side_effect = httpx.ConnectError("refused")
+
+        result = await opn_mcp_info(mock_ctx)
+
+        assert result["opnsense_version"] is None
+        assert "version_detection_error" in result
+        assert "Failed to connect" in result["version_detection_error"]
+
+    async def test_version_detection_failure_still_returns_other_fields(self, mock_api, mock_ctx):
+        mock_api._detected_version = None
+        mock_api._client.get.side_effect = httpx.ConnectError("refused")
+
+        result = await opn_mcp_info(mock_ctx)
+
+        assert isinstance(result["mcp_version"], str) and result["mcp_version"]
+        assert result["write_mode"] is False
+        assert result["api_style"] == "camelCase"

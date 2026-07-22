@@ -26,17 +26,36 @@ class TestOpnInterfaceStats:
 class TestOpnArpTable:
     """Tests for opn_arp_table."""
 
-    async def test_calls_interface_arp(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"arp": []})
+    async def test_wraps_bare_list_with_entries_and_count(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(
+            return_value=[
+                {"ip": "192.168.1.10", "mac": "aa:bb:cc:dd:ee:ff", "intf": "em0", "hostname": "host1"},
+                {"ip": "192.168.1.11", "mac": "aa:bb:cc:dd:ee:00", "intf": "em0", "hostname": "host2"},
+            ]
+        )
         result = await opn_arp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.arp")
-        assert result == {"arp": []}
+        assert result["count"] == 2
+        assert len(result["entries"]) == 2
+        assert result["entries"][0]["ip"] == "192.168.1.10"
+
+    async def test_wraps_empty_list(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value=[])
+        result = await opn_arp_table(mock_ctx)
+        mock_api.get.assert_called_once_with("interface.arp")
+        assert result == {"entries": [], "count": 0}
+
+    async def test_passes_through_dict_result_unchanged(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [{"ip": "192.168.1.10"}], "rowCount": 1})
+        result = await opn_arp_table(mock_ctx)
+        mock_api.get.assert_called_once_with("interface.arp")
+        assert result == {"rows": [{"ip": "192.168.1.10"}], "rowCount": 1}
 
 
 class TestOpnNdpTable:
     """Tests for opn_ndp_table."""
 
-    async def test_calls_interface_ndp(self, mock_api, mock_ctx):
+    async def test_wraps_bare_list_with_entries_and_count(self, mock_api, mock_ctx):
         mock_api.get = AsyncMock(
             return_value=[
                 {"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff", "intf": "em0"},
@@ -44,14 +63,20 @@ class TestOpnNdpTable:
         )
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
-        assert isinstance(result, list)
-        assert result[0]["ip"] == "fe80::1"
+        assert result["count"] == 1
+        assert result["entries"][0]["ip"] == "fe80::1"
 
-    async def test_returns_empty_ndp_table(self, mock_api, mock_ctx):
+    async def test_wraps_empty_list(self, mock_api, mock_ctx):
         mock_api.get = AsyncMock(return_value=[])
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
-        assert result == []
+        assert result == {"entries": [], "count": 0}
+
+    async def test_passes_through_dict_result_unchanged(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_ndp_table(mock_ctx)
+        mock_api.get.assert_called_once_with("interface.ndp")
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnIpv6Status:
