@@ -48,13 +48,15 @@ pip install opnsense-mcp-server
 uv pip install opnsense-mcp-server
 
 # Using Docker
-docker pull lucamarien/opnsense-mcp-server
+docker pull uhlenheide/opnsense-mcp-server
 
 # From source
 git clone https://github.com/lucamarien/opnsense-mcp-server
 cd opnsense-mcp-server
 pip install -e .
 ```
+
+> **Docker image:** the official image is [`uhlenheide/opnsense-mcp-server`](https://hub.docker.com/r/uhlenheide/opnsense-mcp-server), published from this repository by [`.github/workflows/publish-docker.yml`](.github/workflows/publish-docker.yml) on every `v*` tag. There is no `lucamarien/opnsense-mcp-server` image — earlier README versions named it by mistake.
 
 ### 3. Configure Your AI Assistant
 
@@ -97,7 +99,7 @@ Or add it globally to `~/.claude/claude_code_config.json`.
         "-e", "OPNSENSE_API_SECRET=your-api-secret-here",
         "-e", "OPNSENSE_VERIFY_SSL=false",
         "-e", "OPNSENSE_ALLOW_WRITES=false",
-        "lucamarien/opnsense-mcp-server"
+        "uhlenheide/opnsense-mcp-server"
       ]
     }
   }
