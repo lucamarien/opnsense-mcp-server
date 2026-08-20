@@ -6,6 +6,7 @@ endpoint blocklist, and error response parsing.
 
 from __future__ import annotations
 
+import posixpath
 from typing import Any
 
 import httpx
@@ -492,6 +493,9 @@ class OPNsenseAPI:
         await self._ensure_version_detected()
         path = self._resolve_endpoint(endpoint)
         if path_suffix:
+            if "/" in path_suffix:
+                msg = f"path_suffix must not contain path separators: {path_suffix!r}"
+                raise BlockedEndpointError(msg)
             path = f"{path}/{path_suffix}"
         self._check_blocklist(path)
         return await self._request("GET", path)
@@ -521,6 +525,9 @@ class OPNsenseAPI:
         await self._ensure_version_detected()
         path = self._resolve_endpoint(endpoint)
         if path_suffix:
+            if "/" in path_suffix:
+                msg = f"path_suffix must not contain path separators: {path_suffix!r}"
+                raise BlockedEndpointError(msg)
             path = f"{path}/{path_suffix}"
         self._check_blocklist(path)
         return await self._request("POST", path, data=data)
@@ -659,10 +666,12 @@ class OPNsenseAPI:
     def _check_blocklist(path: str) -> None:
         """Raise if the resolved path matches a blocked endpoint.
 
-        Checks are normalized (stripped slashes, lowercased) and match
-        both exact paths and prefix patterns.
+        Checks are normalized (`..`/`.` segments collapsed via
+        `posixpath.normpath`, then stripped/lowercased) before matching,
+        so a `path_suffix` traversal out of an allowed base cannot reach
+        a blocked endpoint.
         """
-        normalized = path.strip("/").lower()
+        normalized = posixpath.normpath(path).strip("/").lower()
         for blocked in BLOCKED_ENDPOINTS:
             if normalized == blocked or normalized.startswith(f"{blocked}/"):
                 msg = f"Endpoint is blocked for safety: {blocked}"

@@ -21,6 +21,11 @@ SENSITIVE_TAGS: frozenset[str] = frozenset(
         "privatekey",
         "certdata",
         "shared_secret",
+        "prv",
+        "privkey",
+        "tls",
+        "shared_key",
+        "apikey",
     }
 )
 

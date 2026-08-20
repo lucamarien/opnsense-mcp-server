@@ -103,7 +103,8 @@ class TestOpnDownloadConfig:
         assert "firewall" in result["config_xml"]
         assert result["size_bytes"] > 0
 
-    async def test_downloads_config_without_stripping(self, mock_api, mock_ctx):
+    async def test_downloads_config_without_stripping(self, mock_api, mock_ctx, monkeypatch):
+        monkeypatch.setenv("OPNSENSE_ALLOW_SECRETS", "true")
         mock_api.get_text = AsyncMock(return_value=self._SAMPLE_XML)
 
         result = await opn_download_config(mock_ctx, include_sensitive=True)
@@ -131,6 +132,80 @@ class TestOpnDownloadConfig:
         assert "stripped" in result
         assert "size_bytes" in result
         assert isinstance(result["size_bytes"], int)
+
+    async def test_include_sensitive_requires_operator_opt_in(self, mock_api, mock_ctx, monkeypatch):
+        """include_sensitive is a caller-supplied tool argument. It must not
+        be honored on its own - an operator-controlled gate (e.g. an env
+        var) is required before secrets are returned unredacted, since a
+        caller can be an AI model acting on injected instructions, not
+        just a deliberate human operator.
+        """
+        monkeypatch.delenv("OPNSENSE_ALLOW_SECRETS", raising=False)
+        xml = (
+            "<?xml version='1.0'?>"
+            "<opnsense><system><user><name>root</name>"
+            "<password>$2y$10$realproductionhash</password></user></system></opnsense>"
+        )
+        mock_api.get_text = AsyncMock(return_value=xml)
+
+        result = await opn_download_config(mock_ctx, include_sensitive=True)
+
+        assert "$2y$10$realproductionhash" not in result["config_xml"]
+
+    async def test_certificate_private_key_redacted_by_default(self, mock_api, mock_ctx):
+        """`<prv>` is OPNsense's real tag for certificate/CA private key
+        material and must be redacted by default.
+        """
+        xml = "<?xml version='1.0'?><opnsense><cert><prv>FAKE-PRIVATE-KEY-DATA</prv></cert></opnsense>"
+        mock_api.get_text = AsyncMock(return_value=xml)
+
+        result = await opn_download_config(mock_ctx)  # default include_sensitive=False
+
+        assert "FAKE-PRIVATE-KEY-DATA" not in result["config_xml"]
+
+    async def test_wireguard_private_key_redacted_by_default(self, mock_api, mock_ctx):
+        """`<privkey>` is OPNsense's real tag for a WireGuard private key
+        and must be redacted by default.
+        """
+        xml = (
+            "<?xml version='1.0'?>"
+            "<opnsense><WireGuard><server><privkey>FAKE-WG-PRIVKEY-B64</privkey>"
+            "</server></WireGuard></opnsense>"
+        )
+        mock_api.get_text = AsyncMock(return_value=xml)
+
+        result = await opn_download_config(mock_ctx)
+
+        assert "FAKE-WG-PRIVKEY-B64" not in result["config_xml"]
+
+    async def test_openvpn_tls_and_shared_key_redacted_by_default(self, mock_api, mock_ctx):
+        """`<tls>` (static key) and `<shared_key>` are OPNsense's real
+        OpenVPN tags for key material and must be redacted by default.
+        """
+        xml = (
+            "<?xml version='1.0'?>"
+            "<opnsense><OpenVPN><server>"
+            "<tls>FAKE-TLS-STATIC-KEY</tls><shared_key>FAKE-SHARED-KEY</shared_key>"
+            "</server></OpenVPN></opnsense>"
+        )
+        mock_api.get_text = AsyncMock(return_value=xml)
+
+        result = await opn_download_config(mock_ctx)
+
+        assert "FAKE-TLS-STATIC-KEY" not in result["config_xml"]
+        assert "FAKE-SHARED-KEY" not in result["config_xml"]
+
+    async def test_apikey_redacted_by_default(self, mock_api, mock_ctx):
+        """`<apikey>` is a real, recurring OPNsense field name for API
+        credentials (used by ddclient, acme-client, q-feeds-connector,
+        among others) and must be redacted by default.
+        """
+        xml = "<?xml version='1.0'?><opnsense><ddclient><account><apikey>FAKE-DDCLIENT-APIKEY</apikey></account></ddclient></opnsense>"
+        mock_api.get_text = AsyncMock(return_value=xml)
+
+        result = await opn_download_config(mock_ctx)
+
+        assert "FAKE-DDCLIENT-APIKEY" not in result["config_xml"]
 
 
 class TestOpnScanConfig:
@@ -262,10 +337,23 @@ class TestOpnGetConfigSection:
         result = await opn_get_config_section(mock_ctx, section="system")
         assert result["data"]["password"] == "[REDACTED]"
 
-    async def test_include_sensitive(self, mock_api, mock_ctx):
+    async def test_include_sensitive(self, mock_api, mock_ctx, monkeypatch):
+        monkeypatch.setenv("OPNSENSE_ALLOW_SECRETS", "true")
         self._setup_mock_api(mock_api)
         result = await opn_get_config_section(mock_ctx, section="system", include_sensitive=True)
         assert result["data"]["password"] == "secret123"
+
+    async def test_include_sensitive_requires_operator_opt_in(self, mock_api, mock_ctx, monkeypatch):
+        """include_sensitive is a caller-supplied tool argument. It must not
+        be honored on its own - an operator-controlled gate (e.g. an env
+        var) is required before secrets are returned unredacted, since a
+        caller can be an AI model acting on injected instructions, not
+        just a deliberate human operator.
+        """
+        monkeypatch.delenv("OPNSENSE_ALLOW_SECRETS", raising=False)
+        self._setup_mock_api(mock_api)
+        result = await opn_get_config_section(mock_ctx, section="system", include_sensitive=True)
+        assert result["data"]["password"] == "[REDACTED]"
 
     async def test_section_not_found(self, mock_api, mock_ctx):
         self._setup_mock_api(mock_api)

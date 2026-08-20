@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import xml.etree.ElementTree as ET
 from typing import Any
 
 from fastmcp import Context
 
 from opnsense_mcp import __version__
+from opnsense_mcp.config import _parse_bool
 from opnsense_mcp.config_cache import SENSITIVE_TAGS
 from opnsense_mcp.server import get_api, get_config_cache, get_savepoint_manager, mcp
 
@@ -25,6 +27,19 @@ def _strip_sensitive_data(xml_text: str) -> str:
             elem.text = "[REDACTED]"
 
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def _secrets_allowed() -> bool:
+    """Whether an operator has opted in to unredacted secret output.
+
+    include_sensitive is a caller-supplied tool argument — the model chooses
+    it, and the realistic trigger is prompt injection through data this
+    server reads (rule descriptions, lease hostnames, alert text), not just
+    a deliberate human operator. Honoring it also requires this
+    operator-controlled environment variable.
+    """
+    raw = os.environ.get("OPNSENSE_ALLOW_SECRETS", "false").strip()
+    return _parse_bool(raw, "OPNSENSE_ALLOW_SECRETS")
 
 
 @mcp.tool()
@@ -83,17 +98,20 @@ async def opn_download_config(
     cached inventory, then opn_get_config_section to query individual sections.
 
     By default, sensitive data (passwords, keys, secrets) is redacted.
+    include_sensitive alone is not enough to disable redaction — the
+    operator must also set OPNSENSE_ALLOW_SECRETS=true.
     Returns: dict with 'config_xml' (str), 'stripped' (bool), 'size_bytes' (int).
     """
     api = get_api(ctx)
     xml_text = await api.get_text("core.backup.download")
 
-    if not include_sensitive:
+    reveal_sensitive = include_sensitive and _secrets_allowed()
+    if not reveal_sensitive:
         xml_text = _strip_sensitive_data(xml_text)
 
     return {
         "config_xml": xml_text,
-        "stripped": not include_sensitive,
+        "stripped": not reveal_sensitive,
         "size_bytes": len(xml_text),
     }
 
@@ -137,6 +155,8 @@ async def opn_get_config_section(
     The 'filter' section is particularly useful — it contains legacy GUI
     firewall rules that are NOT visible via opn_list_firewall_rules.
 
+    include_sensitive alone is not enough to disable redaction — the
+    operator must also set OPNSENSE_ALLOW_SECRETS=true.
     Returns: dict with 'section' name and 'data' (structured config data).
     """
     api = get_api(ctx)
@@ -145,7 +165,8 @@ async def opn_get_config_section(
     if not cache.is_loaded or cache.is_stale:
         await cache.load(api)
 
-    result = cache.get_section(section, include_sensitive=include_sensitive)
+    reveal_sensitive = include_sensitive and _secrets_allowed()
+    result = cache.get_section(section, include_sensitive=reveal_sensitive)
     if result is None:
         return {
             "error": f"Section '{section}' not found",

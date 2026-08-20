@@ -447,6 +447,33 @@ class TestPathSuffix:
         finally:
             del ENDPOINT_REGISTRY["_test_suffix"]
 
+    # _check_blocklist runs against the unnormalized path, and httpx
+    # collapses `../` segments before sending - so a suffix can escape an
+    # ALLOWED base into a BLOCKED one via traversal. path_suffix must be
+    # validated (e.g. UUID format) and/or normalized before the blocklist
+    # check for the following two tests to pass.
+
+    async def test_get_suffix_traversal_from_allowed_base_reaches_blocked_endpoint(
+        self, mock_config, mock_httpx_client
+    ):
+        """Read-only mode: GET path_suffix traversal must still be blocked."""
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        with pytest.raises(BlockedEndpointError):
+            await api.get("unbound.get_dnsbl", path_suffix="../../../core/system/halt")
+
+    async def test_post_suffix_traversal_from_allowed_base_reaches_blocked_endpoint(
+        self, mock_config_writes, mock_httpx_client
+    ):
+        """Write mode: POST path_suffix traversal must still be blocked.
+
+        Unmitigated, this turns any UUID-taking write tool (e.g.
+        opn_delete_firewall_rule) into a firewall halt/reboot/
+        firmware-upgrade primitive via uuid="../../../core/system/halt".
+        """
+        api = _make_api_with_version(mock_config_writes, mock_httpx_client, (25, 1))
+        with pytest.raises(BlockedEndpointError):
+            await api.post("firewall.del_rule", path_suffix="../../../core/system/halt")
+
 
 # --- Savepoint Manager Tests ---
 

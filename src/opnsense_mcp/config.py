@@ -6,6 +6,9 @@ Environment variables:
     OPNSENSE_API_SECRET: API secret (required)
     OPNSENSE_VERIFY_SSL: Verify SSL certificate (default: true)
     OPNSENSE_ALLOW_WRITES: Enable write operations (default: false)
+    OPNSENSE_ALLOW_SECRETS: Allow tools to return unredacted secrets when a
+        caller also passes include_sensitive=True (default: false). Read
+        directly by opnsense_mcp.tools.system, not part of OPNsenseConfig.
 """
 
 from __future__ import annotations

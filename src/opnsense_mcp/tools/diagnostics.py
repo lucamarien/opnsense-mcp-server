@@ -11,7 +11,9 @@ from opnsense_mcp.server import get_api, mcp
 
 _MAX_PING_POLLS = 30
 _PING_POLL_INTERVAL = 1.0
-_HOSTNAME_REJECT = frozenset({";", "&", "|", "$", "`", "\n", "\r", "(", ")", "{", "}", "<", ">", "'", '"', "\\", " "})
+_HOSTNAME_REJECT = frozenset(
+    {";", "&", "|", "$", "`", "\n", "\r", "\t", "(", ")", "{", "}", "<", ">", "'", '"', "\\", " "}
+)
 
 
 def _validate_hostname(value: str) -> str | None:
@@ -40,6 +42,7 @@ async def opn_ping(
         return {"error": err}
     count = max(1, min(count, 10))
     api = get_api(ctx)
+    api.require_writes()
 
     # Create and configure the ping job
     result = await api.post(
@@ -100,6 +103,7 @@ async def opn_traceroute(
         return {"error": f"Invalid ip_version '{ip_version}'. Use '4' or '6'."}
 
     api = get_api(ctx)
+    api.require_writes()
     result = await api.post(
         "diagnostics.traceroute.set",
         {
@@ -132,6 +136,7 @@ async def opn_dns_lookup(
     if server and (err := _validate_hostname(server)):
         return {"error": f"Invalid DNS server: {err}"}
     api = get_api(ctx)
+    api.require_writes()
     result = await api.post(
         "diagnostics.dns_diagnostics.set",
         {"dns": {"settings": {"hostname": hostname, "server": server}}},
