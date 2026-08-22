@@ -93,6 +93,164 @@ async def opn_list_dnsmasq_ranges(
 
 
 @mcp.tool()
+async def opn_list_dnsmasq_hosts(
+    ctx: Context,
+    search: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List configured dnsmasq static host mappings.
+
+    Use this to view the entries under Services > Dnsmasq DNS & DHCP > Hosts.
+    Each entry maps a client MAC address or identifier to a hostname and fixed
+    IPv4 or IPv6 address.
+    """
+    api = get_api(ctx)
+    return await api.post(
+        "dnsmasq.settings.search_host",
+        {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
+    )
+
+
+@mcp.tool()
+async def opn_add_dnsmasq_host(
+    ctx: Context,
+    host: str,
+    ip: str,
+    domain: str = "",
+    hwaddr: str = "",
+    client_id: str = "",
+    lease_time: str = "",
+    local: bool = True,
+    cnames: str = "",
+    aliases: str = "",
+    set_tag: str = "",
+    description: str = "",
+    comments: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    """Create a dnsmasq static host mapping and apply it immediately.
+
+    Use this to reserve an IPv4 or IPv6 address and optionally associate it
+    with a MAC address or DHCP client identifier. Write mode is required.
+    """
+    if not host.strip():
+        return {"error": "host must not be empty"}
+    if not ip.strip():
+        return {"error": "ip must not be empty"}
+
+    api = get_api(ctx)
+    api.require_writes()
+
+    host_config: dict[str, str] = {
+        "host": host,
+        "ip": ip,
+        "local": "1" if local else "0",
+        "ignore": "0" if enabled else "1",
+    }
+    optional_fields = {
+        "domain": domain,
+        "hwaddr": hwaddr,
+        "client_id": client_id,
+        "lease_time": lease_time,
+        "cnames": cnames,
+        "aliases": aliases,
+        "set_tag": set_tag,
+        "descr": description,
+        "comments": comments,
+    }
+    host_config.update({key: value for key, value in optional_fields.items() if value})
+
+    add_result = await api.post("dnsmasq.settings.add_host", {"host": host_config})
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": add_result.get("result", "unknown"),
+        "uuid": add_result.get("uuid", ""),
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_update_dnsmasq_host(
+    ctx: Context,
+    uuid: str,
+    host: str | None = None,
+    ip: str | None = None,
+    domain: str | None = None,
+    hwaddr: str | None = None,
+    client_id: str | None = None,
+    lease_time: str | None = None,
+    local: bool | None = None,
+    cnames: str | None = None,
+    aliases: str | None = None,
+    set_tag: str | None = None,
+    description: str | None = None,
+    comments: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update selected fields on a dnsmasq static host mapping and apply it.
+
+    Provide the UUID from opn_list_dnsmasq_hosts. Omitted fields are preserved.
+    Write mode is required.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+
+    host_config: dict[str, str] = {}
+    string_fields = {
+        "host": host,
+        "ip": ip,
+        "domain": domain,
+        "hwaddr": hwaddr,
+        "client_id": client_id,
+        "lease_time": lease_time,
+        "cnames": cnames,
+        "aliases": aliases,
+        "set_tag": set_tag,
+        "descr": description,
+        "comments": comments,
+    }
+    host_config.update({key: value for key, value in string_fields.items() if value is not None})
+    if local is not None:
+        host_config["local"] = "1" if local else "0"
+    if enabled is not None:
+        host_config["ignore"] = "0" if enabled else "1"
+
+    result = await api.post("dnsmasq.settings.set_host", {"host": host_config}, path_suffix=uuid)
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_delete_dnsmasq_host(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete a dnsmasq static host mapping and apply the configuration.
+
+    Use opn_list_dnsmasq_hosts first to find the UUID. Write mode is required.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("dnsmasq.settings.del_host", path_suffix=uuid)
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
 async def opn_add_dnsmasq_range(
     ctx: Context,
     interface: str,

@@ -349,6 +349,22 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "dnsmasq/settings/searchRange",
         "dnsmasq/settings/search_range",
     ),
+    "dnsmasq.settings.search_host": (
+        "dnsmasq/settings/searchHost",
+        "dnsmasq/settings/search_host",
+    ),
+    "dnsmasq.settings.add_host": (
+        "dnsmasq/settings/addHost",
+        "dnsmasq/settings/add_host",
+    ),
+    "dnsmasq.settings.set_host": (
+        "dnsmasq/settings/setHost",
+        "dnsmasq/settings/set_host",
+    ),
+    "dnsmasq.settings.del_host": (
+        "dnsmasq/settings/delHost",
+        "dnsmasq/settings/del_host",
+    ),
     "dnsmasq.settings.add_range": (
         "dnsmasq/settings/addRange",
         "dnsmasq/settings/add_range",

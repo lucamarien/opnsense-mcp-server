@@ -8,13 +8,17 @@ import pytest
 
 from opnsense_mcp.api_client import WriteDisabledError
 from opnsense_mcp.tools.dhcp import (
+    opn_add_dnsmasq_host,
     opn_add_dnsmasq_range,
+    opn_delete_dnsmasq_host,
     opn_delete_dnsmasq_range,
     opn_list_dhcp_leases,
+    opn_list_dnsmasq_hosts,
     opn_list_dnsmasq_leases,
     opn_list_dnsmasq_ranges,
     opn_list_kea_leases,
     opn_reconfigure_dnsmasq,
+    opn_update_dnsmasq_host,
     opn_update_dnsmasq_range,
 )
 
@@ -108,6 +112,148 @@ class TestOpnListDnsmasqRanges:
         await opn_list_dnsmasq_ranges(mock_ctx, limit=999)
         call_args = mock_api.post.call_args[0][1]
         assert call_args["rowCount"] == 500
+
+
+class TestOpnListDnsmasqHosts:
+    """Tests for opn_list_dnsmasq_hosts."""
+
+    async def test_calls_search_host(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_list_dnsmasq_hosts(mock_ctx)
+        mock_api.post.assert_called_once_with(
+            "dnsmasq.settings.search_host",
+            {"current": 1, "rowCount": 50, "searchPhrase": ""},
+        )
+        assert result == {"rows": [], "rowCount": 0}
+
+    async def test_passes_search_and_limit(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        await opn_list_dnsmasq_hosts(mock_ctx, search="printer", limit=20)
+        mock_api.post.assert_called_once_with(
+            "dnsmasq.settings.search_host",
+            {"current": 1, "rowCount": 20, "searchPhrase": "printer"},
+        )
+
+    async def test_limit_capped_at_500(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        await opn_list_dnsmasq_hosts(mock_ctx, limit=999)
+        call_args = mock_api.post.call_args[0][1]
+        assert call_args["rowCount"] == 500
+
+
+class TestOpnAddDnsmasqHost:
+    """Tests for opn_add_dnsmasq_host."""
+
+    async def test_creates_host_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved", "uuid": "host-uuid"}, {"status": "ok"}],
+        )
+        result = await opn_add_dnsmasq_host(
+            mock_ctx_writes,
+            host="printer",
+            ip="192.168.1.50",
+            domain="home",
+            hwaddr="00:11:22:33:44:55",
+        )
+        add_call = mock_api_writes.post.call_args_list[0]
+        assert add_call[0][0] == "dnsmasq.settings.add_host"
+        assert add_call[0][1] == {
+            "host": {
+                "host": "printer",
+                "ip": "192.168.1.50",
+                "local": "1",
+                "ignore": "0",
+                "domain": "home",
+                "hwaddr": "00:11:22:33:44:55",
+            }
+        }
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dnsmasq.service.reconfigure"
+        assert result == {"result": "saved", "uuid": "host-uuid", "reconfigure_status": "ok"}
+
+    async def test_supports_disabled_non_local_host(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"uuid": "host-uuid"}, {"status": "ok"}])
+        await opn_add_dnsmasq_host(
+            mock_ctx_writes,
+            host="guest",
+            ip="10.0.0.10",
+            local=False,
+            enabled=False,
+        )
+        host_config = mock_api_writes.post.call_args_list[0][0][1]["host"]
+        assert host_config["local"] == "0"
+        assert host_config["ignore"] == "1"
+
+    async def test_requires_host_and_ip(self, mock_api_writes, mock_ctx_writes):
+        assert "host" in (await opn_add_dnsmasq_host(mock_ctx_writes, host="", ip="10.0.0.10"))["error"]
+        assert "ip" in (await opn_add_dnsmasq_host(mock_ctx_writes, host="printer", ip=""))["error"]
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_add_dnsmasq_host(mock_ctx, host="printer", ip="10.0.0.10")
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"uuid": "host-uuid"}, {"status": "ok"}])
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_add_dnsmasq_host(mock_ctx_writes, host="printer", ip="10.0.0.10")
+        assert cache._stale
+
+
+class TestOpnUpdateDnsmasqHost:
+    """Tests for opn_update_dnsmasq_host."""
+
+    async def test_updates_selected_fields_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
+        result = await opn_update_dnsmasq_host(
+            mock_ctx_writes,
+            uuid="host-uuid",
+            ip="10.0.0.11",
+            enabled=False,
+        )
+        set_call = mock_api_writes.post.call_args_list[0]
+        assert set_call[0] == ("dnsmasq.settings.set_host", {"host": {"ip": "10.0.0.11", "ignore": "1"}})
+        assert set_call[1]["path_suffix"] == "host-uuid"
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dnsmasq.service.reconfigure"
+        assert result == {"result": "saved", "uuid": "host-uuid", "reconfigure_status": "ok"}
+
+    async def test_allows_empty_string_to_clear_a_field(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
+        await opn_update_dnsmasq_host(mock_ctx_writes, uuid="host-uuid", domain="")
+        host_config = mock_api_writes.post.call_args_list[0][0][1]["host"]
+        assert host_config == {"domain": ""}
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_update_dnsmasq_host(mock_ctx, uuid="host-uuid", ip="10.0.0.11")
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_update_dnsmasq_host(mock_ctx_writes, uuid="host-uuid", host="new-host")
+        assert cache._stale
+
+
+class TestOpnDeleteDnsmasqHost:
+    """Tests for opn_delete_dnsmasq_host."""
+
+    async def test_deletes_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "deleted"}, {"status": "ok"}])
+        result = await opn_delete_dnsmasq_host(mock_ctx_writes, uuid="host-uuid")
+        mock_api_writes.post.assert_any_call("dnsmasq.settings.del_host", path_suffix="host-uuid")
+        assert mock_api_writes.post.call_args_list[1][0][0] == "dnsmasq.service.reconfigure"
+        assert result == {"result": "deleted", "uuid": "host-uuid", "reconfigure_status": "ok"}
+
+    async def test_requires_writes_enabled(self, mock_ctx):
+        with pytest.raises(WriteDisabledError):
+            await opn_delete_dnsmasq_host(mock_ctx, uuid="host-uuid")
+
+    async def test_invalidates_config_cache(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "deleted"}, {"status": "ok"}])
+        cache = mock_ctx_writes.lifespan_context["config_cache"]
+        cache._stale = False
+        await opn_delete_dnsmasq_host(mock_ctx_writes, uuid="host-uuid")
+        assert cache._stale
 
 
 class TestOpnAddDnsmasqRange:
