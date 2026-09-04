@@ -16,7 +16,9 @@ async def opn_interface_stats(ctx: Context) -> dict[str, Any]:
 
     Use this when you need to see network utilization, check for interface
     errors, or compare traffic across interfaces.
-    Returns: dict keyed by interface name with statistics fields.
+    Returns: dict with 'rows' (list of per-interface statistics) and
+    'rowCount' (total) — the API's bare-array response is wrapped at the
+    client boundary.
     """
     api = get_api(ctx)
     return await api.get("interface.statistics")
@@ -28,7 +30,8 @@ async def opn_arp_table(ctx: Context) -> dict[str, Any]:
 
     Use this when you need to find which MAC address is associated with an IP,
     identify devices on a network segment, or troubleshoot connectivity.
-    Returns: dict with ARP entries including ip, mac, intf, and hostname fields.
+    Returns: dict with 'rows' (list of ARP entries including ip, mac, intf,
+    and hostname fields) and 'rowCount' (total).
     """
     api = get_api(ctx)
     return await api.get("interface.arp")
@@ -41,7 +44,8 @@ async def opn_ndp_table(ctx: Context) -> dict[str, Any]:
     Use this when you need to find which MAC address is associated with an IPv6
     address, identify IPv6-enabled devices on a network segment, or troubleshoot
     IPv6 neighbor reachability. This is the IPv6 equivalent of the ARP table.
-    Returns: dict with NDP entries including ip, mac, intf, and manufacturer fields.
+    Returns: dict with 'rows' (list of NDP entries including ip, mac, intf,
+    and manufacturer fields) and 'rowCount' (total).
     """
     api = get_api(ctx)
     return await api.get("interface.ndp")

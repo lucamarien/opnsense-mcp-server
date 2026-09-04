@@ -263,6 +263,107 @@ class TestHTTPMethods:
             await api.get("firmware.status")
 
 
+# --- Response Normalization Tests ---
+
+
+class TestResponseNormalization:
+    """Bare-array API responses must be normalized to a dict at the client boundary.
+
+    Several endpoints (diagnostics/interface/getArp, getNdp,
+    getInterfaceStatistics, ...) answer with a bare JSON array instead of
+    the {rows, rowCount} envelope. Tools declare a dict return type and
+    the MCP transport rejects non-dict structured content — a 500 whose
+    error body leaks the full payload. The client normalizes so tools
+    always receive a dict.
+    """
+
+    # (http method, logical endpoint) — known suspects for bare-array responses
+    ENDPOINT_SHAPES = [
+        ("get", "interface.arp"),
+        ("get", "interface.ndp"),
+        ("get", "interface.statistics"),
+        ("get", "gateway.status"),
+        ("get", "dhcpv4.leases.search"),
+        ("post", "diagnostics.firewall.query_states"),
+        ("post", "firewall.alias.search"),
+        ("post", "firewall.search_rule"),
+        ("post", "core.service.search"),
+    ]
+
+    def _request(self, api, method, endpoint):
+        if method == "get":
+            return api.get(endpoint)
+        return api.post(endpoint, {"current": 1, "rowCount": 10, "searchPhrase": ""})
+
+    @pytest.mark.parametrize("method,endpoint", ENDPOINT_SHAPES)
+    async def test_bare_list_wrapped_in_envelope(self, method, endpoint, mock_config, mock_httpx_client):
+        entries = [
+            {"ip": "10.0.0.1", "mac": "aa:bb:cc:dd:ee:ff", "intf": "lan"},
+            {"ip": "10.0.0.2", "mac": "11:22:33:44:55:66", "intf": "lan"},
+        ]
+        getattr(mock_httpx_client, method).return_value = _make_response(json_data=entries)
+
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        result = await self._request(api, method, endpoint)
+
+        assert isinstance(result, dict)
+        assert result == {"rows": entries, "rowCount": 2}
+
+    @pytest.mark.parametrize("method,endpoint", ENDPOINT_SHAPES)
+    async def test_wrapped_dict_passes_through_unchanged(self, method, endpoint, mock_config, mock_httpx_client):
+        payload = {
+            "rows": [{"ip": "10.0.0.1", "mac": "aa:bb:cc:dd:ee:ff"}],
+            "rowCount": 1,
+        }
+        getattr(mock_httpx_client, method).return_value = _make_response(json_data=payload)
+
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        result = await self._request(api, method, endpoint)
+
+        assert result is payload
+
+    @pytest.mark.parametrize("method,endpoint", ENDPOINT_SHAPES)
+    async def test_empty_list_wrapped_in_envelope(self, method, endpoint, mock_config, mock_httpx_client):
+        getattr(mock_httpx_client, method).return_value = _make_response(json_data=[])
+
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        result = await self._request(api, method, endpoint)
+
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
+
+    @pytest.mark.parametrize("method,endpoint", ENDPOINT_SHAPES)
+    async def test_empty_dict_passes_through(self, method, endpoint, mock_config, mock_httpx_client):
+        getattr(mock_httpx_client, method).return_value = _make_response(json_data={})
+
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        result = await self._request(api, method, endpoint)
+
+        assert result == {}
+
+    async def test_scalar_payload_wrapped_under_result(self, mock_config, mock_httpx_client):
+        """Defensive: any non-dict/non-list payload still yields a dict."""
+        mock_httpx_client.get.return_value = _make_response(json_data="ok")
+
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        result = await api.get("firmware.status")
+
+        assert isinstance(result, dict)
+        assert result == {"result": "ok"}
+
+    async def test_none_payload_wrapped_under_result(self, mock_config, mock_httpx_client):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = None
+        mock_httpx_client.get.return_value = resp
+
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        result = await api.get("gateway.status")
+
+        assert isinstance(result, dict)
+        assert result == {"result": None}
+
+
 # --- Error Parsing Tests ---
 
 

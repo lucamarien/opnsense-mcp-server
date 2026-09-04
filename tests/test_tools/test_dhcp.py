@@ -22,11 +22,25 @@ from opnsense_mcp.tools.dhcp import (
 class TestOpnListDhcpLeases:
     """Tests for opn_list_dhcp_leases (ISC DHCP)."""
 
-    async def test_calls_dhcpv4_leases_search(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"leases": []})
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        rows = [{"ip": "192.168.1.50", "mac": "aa:bb:cc:dd:ee:ff", "hostname": "pc"}]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_list_dhcp_leases(mock_ctx)
         mock_api.get.assert_called_once_with("dhcpv4.leases.search")
+        assert isinstance(result, dict)
+        assert result == payload
+
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"leases": []})
+        result = await opn_list_dhcp_leases(mock_ctx)
         assert result == {"leases": []}
+
+    async def test_empty_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_list_dhcp_leases(mock_ctx)
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnListKeaLeases:

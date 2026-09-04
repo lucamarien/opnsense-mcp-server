@@ -16,42 +16,81 @@ from opnsense_mcp.tools.network import (
 class TestOpnInterfaceStats:
     """Tests for opn_interface_stats."""
 
-    async def test_calls_interface_statistics(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"statistics": {}})
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        # OPNsense may answer getInterfaceStatistics with a bare array; the
+        # API client wraps it in rows/rowCount before the tool sees it.
+        rows = [{"interface": "lan", "bytes_in": 1024, "bytes_out": 2048}]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_interface_stats(mock_ctx)
         mock_api.get.assert_called_once_with("interface.statistics")
-        assert result == {"statistics": {}}
+        assert isinstance(result, dict)
+        assert result == payload
+
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"statistics": {"lan": {"bytes_in": 1}}})
+        result = await opn_interface_stats(mock_ctx)
+        assert result == {"statistics": {"lan": {"bytes_in": 1}}}
+
+    async def test_empty_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_interface_stats(mock_ctx)
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnArpTable:
     """Tests for opn_arp_table."""
 
-    async def test_calls_interface_arp(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"arp": []})
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        # OPNsense answers getArp with a bare JSON array; the API client
+        # wraps it in rows/rowCount so the tool always returns a dict.
+        rows = [
+            {"ip": "192.168.1.10", "mac": "aa:bb:cc:dd:ee:ff", "intf": "lan", "hostname": "host"},
+            {"ip": "192.168.1.11", "mac": "11:22:33:44:55:66", "intf": "lan", "hostname": ""},
+        ]
+        payload = {"rows": rows, "rowCount": 2}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_arp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.arp")
-        assert result == {"arp": []}
+        assert isinstance(result, dict)
+        assert result == payload
+        assert result["rows"][0]["mac"] == "aa:bb:cc:dd:ee:ff"
+
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"arp": [{"ip": "10.0.0.1", "mac": "aa:bb:cc:dd:ee:ff"}]})
+        result = await opn_arp_table(mock_ctx)
+        assert result == {"arp": [{"ip": "10.0.0.1", "mac": "aa:bb:cc:dd:ee:ff"}]}
+
+    async def test_empty_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_arp_table(mock_ctx)
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnNdpTable:
     """Tests for opn_ndp_table."""
 
-    async def test_calls_interface_ndp(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(
-            return_value=[
-                {"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff", "intf": "em0"},
-            ]
-        )
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        rows = [{"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff", "intf": "em0"}]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
-        assert isinstance(result, list)
-        assert result[0]["ip"] == "fe80::1"
+        assert isinstance(result, dict)
+        assert result == payload
+        assert result["rows"][0]["ip"] == "fe80::1"
 
-    async def test_returns_empty_ndp_table(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value=[])
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"ndp": [{"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff"}]})
         result = await opn_ndp_table(mock_ctx)
-        mock_api.get.assert_called_once_with("interface.ndp")
-        assert result == []
+        assert result == {"ndp": [{"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff"}]}
+
+    async def test_empty_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_ndp_table(mock_ctx)
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnIpv6Status:

@@ -418,6 +418,25 @@ class SavepointError(OPNsenseAPIError):
     """Raised when a savepoint operation fails."""
 
 
+def _normalize_response(payload: Any) -> dict[str, Any]:
+    """Normalize a parsed OPNsense API payload to a dict.
+
+    Most endpoints return a JSON object, but some — notably
+    diagnostics/interface/getArp, getNdp and getInterfaceStatistics —
+    return a bare JSON array. Tools declare a dict return type, and the
+    MCP transport rejects non-dict structured content with an error that
+    embeds the full payload. Normalizing at the client boundary
+    guarantees every JSON response is a dict: bare arrays are wrapped in
+    the same {rows, rowCount} envelope the search endpoints use, and any
+    other scalar payload is wrapped under "result".
+    """
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {"rows": payload, "rowCount": len(payload)}
+    return {"result": payload}
+
+
 def _is_missing_endpoint(exc: OPNsenseAPIError, detected_version: tuple[int, int] | None) -> bool:
     """Whether an API error is OPNsense reporting that the endpoint does not exist.
 
@@ -573,12 +592,12 @@ class OPNsenseAPI:
             raise OPNsenseAPIError(error_msg, status_code=response.status_code)
 
         try:
-            result: dict[str, Any] = response.json()
+            result: Any = response.json()
         except (ValueError, TypeError) as exc:
             msg = f"Invalid JSON response from {path}"
             raise OPNsenseAPIError(msg) from exc
 
-        return result
+        return _normalize_response(result)
 
     async def _request_text(
         self,

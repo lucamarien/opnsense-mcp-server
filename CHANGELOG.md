@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Serialization:** `opn_arp_table`, `opn_ndp_table` and other read tools that
+  hit OPNsense endpoints answering with a bare JSON array
+  (`diagnostics/interface/getArp`, `getNdp`, `getInterfaceStatistics`, …)
+  failed with an HTTP 500 whose error body leaked the full table data.
+  The API client now normalizes every JSON response to a dict at the
+  boundary — bare arrays are wrapped in the `rows`/`rowCount` envelope —
+  so tools always return a well-formed dict and the data-in-the-error-body
+  behavior is gone. Wrapped (`dict`) responses pass through unchanged.
+
 ## [0.4.1] - 2026-08-19
 
 ### Added

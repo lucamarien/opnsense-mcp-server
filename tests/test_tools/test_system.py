@@ -66,11 +66,25 @@ class TestOpnListServices:
 class TestOpnGatewayStatus:
     """Tests for opn_gateway_status."""
 
-    async def test_calls_gateway_status(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"items": []})
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        rows = [{"name": "WAN_GW", "status": "up", "loss": 0, "delay": 5}]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_gateway_status(mock_ctx)
         mock_api.get.assert_called_once_with("gateway.status")
+        assert isinstance(result, dict)
+        assert result == payload
+
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"items": []})
+        result = await opn_gateway_status(mock_ctx)
         assert result == {"items": []}
+
+    async def test_empty_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_gateway_status(mock_ctx)
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnDownloadConfig:
