@@ -111,4 +111,4 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 81, f"Expected 81 tools, got {len(tools)}"
+        assert len(tools) == 85, f"Expected 85 tools, got {len(tools)}"

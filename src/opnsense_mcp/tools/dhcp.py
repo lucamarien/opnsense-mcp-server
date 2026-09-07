@@ -279,3 +279,180 @@ async def opn_reconfigure_dnsmasq(ctx: Context) -> dict[str, Any]:
     result = await api.post("dnsmasq.service.reconfigure")
     get_config_cache(ctx).invalidate()
     return {"status": result.get("status", "unknown"), "service": "dnsmasq"}
+
+
+# --- Dnsmasq Static Host Reservations ---
+
+
+@mcp.tool()
+async def opn_list_dnsmasq_hosts(
+    ctx: Context,
+    search: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List dnsmasq static host reservations.
+
+    Use this to see configured static DHCP leases (host reservations).
+    A static reservation ensures a client always receives the same IP address.
+
+    Use this when you need to:
+    - View existing static DHCP reservations
+    - Verify which MAC addresses have reserved IPs
+    - Find a reservation UUID to update or delete
+
+    Key fields: host (hostname), ip, hwaddr (MAC), descr, aliases.
+
+    Note: Requires the dnsmasq DNS/DHCP server.
+    Returns: dict with 'rows' (list of reservations) and 'rowCount' (total).
+    """
+    api = get_api(ctx)
+    return await api.post(
+        "dnsmasq.settings.search_host",
+        {"current": 1, "rowCount": min(limit, 500), "searchPhrase": search},
+    )
+
+
+@mcp.tool()
+async def opn_add_dnsmasq_host(
+    ctx: Context,
+    ip: str,
+    mac: str,
+    hostname: str = "",
+    description: str = "",
+    domain: str = "",
+) -> dict[str, Any]:
+    """Create a new dnsmasq static host reservation and apply the configuration.
+
+    Use this to assign a fixed IP address to a specific device based on its MAC address.
+
+    Args:
+        ip: The static IP address to assign (e.g., '192.168.1.100').
+        mac: The MAC address of the client (e.g., 'aa:bb:cc:dd:ee:ff').
+        hostname: Optional hostname for the client (e.g., 'myserver').
+        description: Optional description for this reservation.
+        domain: Optional domain for the host (e.g., 'internal'). If empty, system domain is used.
+
+    Note: After creation, the dnsmasq service is automatically reconfigured.
+    Changes take effect immediately when the client renews its lease.
+
+    Note: Requires the dnsmasq DNS/DHCP server.
+    Returns: dict with 'result' (str), 'uuid' of the new reservation, and reconfigure status.
+    """
+    if not ip.strip():
+        return {"error": "ip must not be empty"}
+    if not mac.strip():
+        return {"error": "mac must not be empty"}
+
+    api = get_api(ctx)
+    api.require_writes()
+
+    host_config: dict[str, str] = {
+        "enabled": "1",
+        "ip": ip,
+        "hwaddr": mac,
+    }
+    if hostname.strip():
+        host_config["host"] = hostname.strip()
+    if description.strip():
+        host_config["descr"] = description.strip()
+    if domain.strip():
+        host_config["domain"] = domain.strip()
+
+    add_result = await api.post("dnsmasq.settings.add_host", {"host": host_config})
+
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": add_result.get("result", "unknown"),
+        "uuid": add_result.get("uuid", ""),
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_update_dnsmasq_host(
+    ctx: Context,
+    uuid: str,
+    ip: str | None = None,
+    mac: str | None = None,
+    hostname: str | None = None,
+    description: str | None = None,
+    domain: str | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Update a dnsmasq static host reservation by UUID and apply the configuration.
+
+    Use this to change the IP address, MAC address, hostname, or other properties
+    of an existing static reservation. Only the parameters you provide are changed;
+    all other settings are preserved.
+
+    After update, the dnsmasq service is automatically reconfigured. Changes
+    take effect when the client renews its lease.
+    Use opn_list_dnsmasq_hosts first to find the UUID.
+
+    Parameters:
+    - uuid: reservation UUID (from opn_list_dnsmasq_hosts)
+    - ip: new static IP address
+    - mac: new MAC address
+    - hostname: new hostname
+    - description: new description
+    - domain: new domain
+    - enabled: enable/disable the reservation
+
+    Returns: dict with 'result' (str), 'uuid' (str), and 'reconfigure_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+
+    host_config: dict[str, str] = {}
+    if ip is not None:
+        host_config["ip"] = ip
+    if mac is not None:
+        host_config["hwaddr"] = mac
+    if hostname is not None:
+        host_config["host"] = hostname
+    if description is not None:
+        host_config["descr"] = description
+    if domain is not None:
+        host_config["domain"] = domain
+    if enabled is not None:
+        host_config["enabled"] = "1" if enabled else "0"
+
+    result = await api.post("dnsmasq.settings.set_host", {"host": host_config}, path_suffix=uuid)
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
+
+
+@mcp.tool()
+async def opn_delete_dnsmasq_host(
+    ctx: Context,
+    uuid: str,
+) -> dict[str, Any]:
+    """Delete a dnsmasq static host reservation by UUID and apply the configuration.
+
+    The deletion is applied immediately (dnsmasq is reconfigured automatically).
+    Use opn_list_dnsmasq_hosts first to find the UUID.
+
+    Note: After a device with this reservation renews its lease, it will receive
+    a dynamic address from the pool instead of the reserved fixed IP.
+
+    Returns: dict with 'result' (str), 'uuid' (str), and 'reconfigure_status'.
+    """
+    api = get_api(ctx)
+    api.require_writes()
+    result = await api.post("dnsmasq.settings.del_host", path_suffix=uuid)
+    reconfigure_result = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure_result.get("status", "unknown"),
+    }
