@@ -114,6 +114,9 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
         "firewall/alias/toggleItem",
         "firewall/alias/toggle_item",
     ),
+    # Loads alias content into the pf tables. The filter apply runs
+    # "filter reload skip_alias" since OPNsense 26.7, so it no longer does this.
+    "firewall.alias.reconfigure": ("firewall/alias/reconfigure", "firewall/alias/reconfigure"),
     # Firewall categories
     "firewall.category.search": (
         "firewall/category/searchItem",

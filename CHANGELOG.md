@@ -63,6 +63,11 @@ Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
   probe the savepoint API once per session and apply directly when OPNsense reports it
   gone; `opn_mcp_info` reports `savepoint_support`. The overlapping-savepoint guard
   only applies where savepoints exist.
+- **Aliases on OPNsense 26.7+ never reached pf:** `opn_manage_alias` only saved to
+  config.xml and relied on a later filter apply to load the tables. 26.7's
+  `applyAction()` reloads with `skip_alias`, so rules referencing a new or changed
+  alias kept matching an empty or stale table. Every alias write now calls
+  `firewall/alias/reconfigure` and reports `applied` (plus `apply_error`).
 
 ### Added
 

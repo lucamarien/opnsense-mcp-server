@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from fastmcp import Context
 
-from opnsense_mcp.api_client import OPNsenseAPIError
+from opnsense_mcp.api_client import OPNsenseAPI, OPNsenseAPIError
 from opnsense_mcp.server import get_api, get_config_cache, get_savepoint_manager, mcp
 from opnsense_mcp.tools._util import (
     DESTRUCTIVE,
@@ -419,6 +419,21 @@ async def opn_manage_firewall_rule(
     }
 
 
+async def _reconfigure_aliases(api: OPNsenseAPI) -> dict[str, Any]:
+    """Load alias content into the pf tables after an alias write.
+
+    OPNsense only stores alias edits in config.xml; a rule referencing the alias
+    keeps matching the old (or, for a new alias, an empty) table until
+    firewall/alias/reconfigure runs. The filter apply used to cover this, but
+    since 26.7 it reloads with skip_alias.
+    """
+    try:
+        await api.post("firewall.alias.reconfigure")
+    except OPNsenseAPIError as exc:
+        return {"applied": False, "apply_error": str(exc)}
+    return {"applied": True}
+
+
 @mcp.tool(annotations=DESTRUCTIVE)
 @catch_api_errors
 async def opn_manage_alias(
@@ -433,10 +448,11 @@ async def opn_manage_alias(
 ) -> dict[str, Any]:
     """Add, update, delete, or toggle a firewall alias (applies immediately).
 
-    Aliases group IPs, networks, or ports under a reusable name. They are
-    metadata definitions — no savepoint protection; changes take effect when
-    a firewall rule references them. Deleting an alias that rules still
-    reference may break those rules: check opn_list_firewall_rules first.
+    Aliases group IPs, networks, or ports under a reusable name. Every write is
+    followed by firewall/alias/reconfigure, which loads the content into the pf
+    tables; no savepoint protection. Rules referencing the alias match the new
+    content right away. Deleting an alias that rules still reference may break
+    those rules: check opn_list_firewall_rules first.
 
     Actions:
     - 'add': create an alias. Requires name; alias_type defaults to 'host'.
@@ -455,7 +471,8 @@ async def opn_manage_alias(
     - enabled: enable/disable the alias
 
     Use opn_list_firewall_aliases first to find UUIDs.
-    Returns: dict with 'result' (str) and 'uuid' (str). On failure: 'error'.
+    Returns: dict with 'result' (str), 'uuid' (str) and 'applied' (bool, whether
+    the pf tables were reloaded; 'apply_error' explains a false). On failure: 'error'.
     """
     if action in ("update", "delete", "toggle") and not uuid:
         return {"error": f"uuid is required for action '{action}'", "error_type": "validation"}
@@ -471,12 +488,14 @@ async def opn_manage_alias(
     if action == "toggle":
         result = await api.post("firewall.alias.toggle", path_suffix=uuid)
         get_config_cache(ctx).invalidate()
-        return {"result": result.get("result", ""), "uuid": uuid}
+        return {"result": result.get("result", ""), "uuid": uuid, **await _reconfigure_aliases(api)}
 
     if action == "delete":
         result = await api.post("firewall.alias.del", path_suffix=uuid)
         get_config_cache(ctx).invalidate()
-        return {"result": result.get("result", ""), "uuid": uuid}
+        if result.get("result") == "failed":
+            return {"result": "failed", "uuid": uuid, "applied": False}
+        return {"result": result.get("result", ""), "uuid": uuid, **await _reconfigure_aliases(api)}
 
     if action == "add":
         if not name:
@@ -495,11 +514,14 @@ async def opn_manage_alias(
             },
         )
         get_config_cache(ctx).invalidate()
-        return {
+        outcome: dict[str, Any] = {
             "result": result.get("result", ""),
             "uuid": result.get("uuid", ""),
             "name": name,
         }
+        if result.get("result") == "failed":
+            return {**outcome, "applied": False}
+        return {**outcome, **await _reconfigure_aliases(api)}
 
     # update — read-modify-write to preserve unspecified fields
     raw = await api.get("firewall.alias.get", path_suffix=uuid)
@@ -517,7 +539,9 @@ async def opn_manage_alias(
 
     result = await api.post("firewall.alias.set", {"alias": current}, path_suffix=uuid)
     get_config_cache(ctx).invalidate()
-    return {"result": result.get("result", ""), "uuid": uuid}
+    if result.get("result") == "failed":
+        return {"result": "failed", "uuid": uuid, "applied": False}
+    return {"result": result.get("result", ""), "uuid": uuid, **await _reconfigure_aliases(api)}
 
 
 @mcp.tool(annotations=DESTRUCTIVE)

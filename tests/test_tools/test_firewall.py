@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
+from unittest.mock import call as mock_call
 
 from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.tools.firewall import (
@@ -421,9 +422,11 @@ class TestManageAlias:
             content="192.168.1.10\n192.168.1.11",
         )
         assert result["uuid"] == "alias-1"
-        # Single post — no savepoint/apply around alias writes
-        assert mock_api_writes.post.call_count == 1
-        payload = mock_api_writes.post.call_args[0][1]["alias"]
+        assert result["applied"] is True
+        # No savepoint/apply around alias writes, only the alias table reload
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["firewall.alias.add", "firewall.alias.reconfigure"]
+        payload = mock_api_writes.post.call_args_list[0][0][1]["alias"]
         assert payload["name"] == "Blocked_Hosts"
         assert payload["type"] == "host"
         assert payload["enabled"] == "1"
@@ -443,7 +446,8 @@ class TestManageAlias:
         mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
         result = await opn_manage_alias(mock_ctx_writes, action="update", uuid="alias-1", content="2.2.2.2")
         assert result["uuid"] == "alias-1"
-        sent = mock_api_writes.post.call_args[0][1]["alias"]
+        assert result["applied"] is True
+        sent = mock_api_writes.post.call_args_list[0][0][1]["alias"]
         assert sent["content"] == "2.2.2.2"
         assert sent["name"] == "Old_Name"  # preserved
         assert sent["description"] == "old"  # preserved
@@ -455,13 +459,36 @@ class TestManageAlias:
     async def test_delete(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
         result = await opn_manage_alias(mock_ctx_writes, action="delete", uuid="alias-1")
-        mock_api_writes.post.assert_called_once_with("firewall.alias.del", path_suffix="alias-1")
+        assert mock_api_writes.post.call_args_list == [
+            mock_call("firewall.alias.del", path_suffix="alias-1"),
+            mock_call("firewall.alias.reconfigure"),
+        ]
         assert result["result"] == "deleted"
 
     async def test_toggle(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.post = AsyncMock(return_value={"result": "ok"})
         await opn_manage_alias(mock_ctx_writes, action="toggle", uuid="alias-1")
-        mock_api_writes.post.assert_called_once_with("firewall.alias.toggle", path_suffix="alias-1")
+        assert mock_api_writes.post.call_args_list == [
+            mock_call("firewall.alias.toggle", path_suffix="alias-1"),
+            mock_call("firewall.alias.reconfigure"),
+        ]
+
+    async def test_reconfigure_failure_is_reported(self, mock_api_writes, mock_ctx_writes):
+        """The alias is saved, but rules keep the old table until the reload works."""
+        mock_api_writes.post = AsyncMock(
+            side_effect=[{"result": "saved", "uuid": "alias-1"}, OPNsenseAPIError("Alias: resolve failed")]
+        )
+        result = await opn_manage_alias(mock_ctx_writes, action="add", name="Hosts", content="10.0.0.1")
+        assert result["result"] == "saved"
+        assert result["applied"] is False
+        assert result["apply_error"] == "Alias: resolve failed"
+
+    async def test_failed_write_skips_reconfigure(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "failed", "validations": {"alias.name": "taken"}})
+        result = await opn_manage_alias(mock_ctx_writes, action="add", name="Hosts")
+        assert result["applied"] is False
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["firewall.alias.add"]
 
     async def test_writes_disabled(self, mock_ctx_no_writes):
         result = await opn_manage_alias(mock_ctx_no_writes, action="delete", uuid="alias-1")
