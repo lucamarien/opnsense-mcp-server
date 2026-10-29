@@ -311,6 +311,17 @@ class TestOpnMcpInfo:
         assert "opnsense_version" in result
         assert "api_style" in result
 
+    async def test_reports_savepoint_support(self, mock_api, mock_ctx):
+        """Rollback availability must be queryable before the first write, not after."""
+        result = await opn_mcp_info(mock_ctx)
+        assert "savepoint_support" in result
+        assert result["savepoint_support"] is None
+
+    async def test_reports_savepoint_support_once_probed(self, mock_api, mock_ctx):
+        mock_ctx.lifespan_context["savepoint_mgr"]._supported = False
+        result = await opn_mcp_info(mock_ctx)
+        assert result["savepoint_support"] is False
+
     async def test_returns_version_string(self, mock_api, mock_ctx):
         result = await opn_mcp_info(mock_ctx)
         assert isinstance(result["mcp_version"], str)

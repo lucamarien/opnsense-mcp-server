@@ -10,7 +10,7 @@ from fastmcp import Context
 from opnsense_mcp import __version__
 from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.config_cache import is_sensitive_tag
-from opnsense_mcp.server import get_api, get_config_cache, mcp
+from opnsense_mcp.server import get_api, get_config_cache, get_savepoint_manager, mcp
 from opnsense_mcp.tools._util import READ_ONLY, catch_api_errors, clamp_limit
 
 _SENSITIVE_GATE_ERROR = {
@@ -225,9 +225,13 @@ async def opn_mcp_info(ctx: Context) -> dict[str, Any]:
     """Get MCP server version and runtime configuration.
 
     Use this to check the MCP server version, whether write mode and
-    sensitive-data access are enabled, and the detected OPNsense API version.
+    sensitive-data access are enabled, the detected OPNsense API version, and
+    whether firewall writes still get savepoint/rollback protection.
     Returns: dict with 'mcp_version', 'write_mode', 'sensitive_mode',
-    'opnsense_version', and 'api_style'.
+    'opnsense_version', 'api_style' and 'savepoint_support'. 'savepoint_support'
+    is true when the 60-second auto-revert is available, false when OPNsense no
+    longer offers it (26.7+ removed it upstream, so firewall changes are immediate
+    and permanent), and null when no firewall write has probed for it yet.
     """
     api = get_api(ctx)
     version = api.detected_version
@@ -237,4 +241,5 @@ async def opn_mcp_info(ctx: Context) -> dict[str, Any]:
         "sensitive_mode": api.config.allow_sensitive,
         "opnsense_version": f"{version[0]}.{version[1]}" if version else None,
         "api_style": "snake_case" if api.use_snake_case else "camelCase",
+        "savepoint_support": get_savepoint_manager(ctx).supported,
     }

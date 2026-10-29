@@ -195,7 +195,8 @@ After applying rules:
 
 ## Production Safety: Savepoint/Rollback
 
-All firewall modifications via the MCP server use OPNsense's savepoint mechanism:
+On **OPNsense < 26.7**, firewall modifications via the MCP server use OPNsense's
+savepoint mechanism:
 
 1. A savepoint is created before any change
 2. Changes are applied with a **60-second auto-revert timer**
@@ -204,6 +205,13 @@ All firewall modifications via the MCP server use OPNsense's savepoint mechanism
 
 This prevents accidental lockouts when modifying firewall rules on production
 systems.
+
+**OPNsense 26.7 removed the savepoint API upstream, so none of that applies
+there.** The server detects the missing endpoint at runtime (no hardcoded version
+check) and falls back to applying changes directly: no revision is returned,
+`opn_confirm_changes` answers `not_applicable`, and nothing auto-reverts. On
+26.7+ take a config backup before write operations and keep out-of-band access to
+the firewall when touching rules that could lock you out.
 
 ## Diagnostic Workflow
 

@@ -14,7 +14,7 @@ A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server
 This MCP server is designed with security as the primary concern:
 
 - **Read-only by default** — write operations require explicit opt-in via `OPNSENSE_ALLOW_WRITES=true`
-- **Savepoint/rollback** — firewall *filter* modifications use OPNsense's built-in 60-second auto-revert mechanism; changes must be explicitly confirmed or they roll back automatically. **Exception:** NAT (port forward) changes apply immediately — OPNsense's savepoint mechanism does not cover the NAT model (verified upstream), and the tools say so honestly
+- **Savepoint/rollback (OPNsense < 26.7 only)** — where OPNsense still offers the savepoint API, firewall *filter* modifications use its built-in 60-second auto-revert; changes must be explicitly confirmed or they roll back automatically. OPNsense 26.7 removed that API upstream — the server detects the missing endpoint at runtime and applies firewall changes immediately, with no automatic rollback. NAT (port forward) changes always apply immediately — OPNsense's savepoint mechanism never covered the NAT model (verified upstream), and the tools say so honestly
 - **Sensitive data double-gate** — `include_sensitive=true` on config tools additionally requires `OPNSENSE_ALLOW_SENSITIVE=true` in the server environment; the model cannot self-elevate to read passwords/keys
 - **HTTPS enforced** — `http://` URLs are refused unless `OPNSENSE_ALLOW_INSECURE_HTTP=true` (API credentials travel as Basic Auth)
 - **Tool annotations** — all 64 tools declare `readOnlyHint`/`destructiveHint`/`idempotentHint`, so MCP clients can auto-approve reads and warn on destructive calls
@@ -58,6 +58,8 @@ git clone https://github.com/lucamarien/opnsense-mcp-server
 cd opnsense-mcp-server
 pip install -e .
 ```
+
+> **Docker image:** the official image is [`uhlenheide/opnsense-mcp-server`](https://hub.docker.com/r/uhlenheide/opnsense-mcp-server), published from this repository by [`.github/workflows/publish-docker.yml`](.github/workflows/publish-docker.yml) on every `v*` tag. There is no `lucamarien/opnsense-mcp-server` image — earlier README versions named it by mistake.
 
 ### 3. Configure Your AI Assistant
 
@@ -159,7 +161,7 @@ uniform API). All errors come back as `{"error", "error_type", ...}` dicts.
 | `opn_download_config` | Download `config.xml` backup (secrets redacted; `include_sensitive` requires the env gate) |
 | `opn_scan_config` | Scan the full configuration into cached, queryable sections + runtime inventory. Params: `force` |
 | `opn_get_config_section` | Get a specific config section as structured JSON. Params: `section`, `include_sensitive` |
-| `opn_mcp_info` | MCP server version, write/sensitive mode, detected OPNsense version, API style |
+| `opn_mcp_info` | MCP server version, write/sensitive mode, detected OPNsense version, API style, and whether firewall writes still get savepoint/rollback protection |
 
 ### Network (7 tools)
 
@@ -182,12 +184,14 @@ uniform API). All errors come back as `{"error", "error_type", ...}` dicts.
 | `opn_list_nat_rules` | List NAT port forwarding (DNAT) rules. Params: `search`, `limit` | No |
 | `opn_list_firewall_categories` | List rule categories and their UUIDs. Params: `search`, `limit` | No |
 | `opn_firewall_log` | Recent firewall log entries with filtering. Params: `source_ip`, `destination_ip`, `action`, `interface`, `limit` | No |
-| `opn_confirm_changes` | Confirm pending savepoint changes (cancels 60s auto-rollback). Params: `revision` | Yes |
-| `opn_manage_firewall_rule` | Add/update/delete/toggle a filter rule (savepoint-protected). Params: `action`, `uuid`, `rule_action`, `direction`, `interface`, `ip_protocol`, `protocol`, source/destination nets+ports, `gateway`, `log`, `quick`, `sequence`, `categories`, `description`, `enabled` | Yes |
+| `opn_confirm_changes` | Confirm pending savepoint changes (cancels 60s auto-rollback; OPNsense < 26.7, a no-op returning `not_applicable` on 26.7+). Params: `revision` | Yes |
+| `opn_manage_firewall_rule` | Add/update/delete/toggle a filter rule (savepoint-protected on OPNsense < 26.7). Params: `action`, `uuid`, `rule_action`, `direction`, `interface`, `ip_protocol`, `protocol`, source/destination nets+ports, `gateway`, `log`, `quick`, `sequence`, `categories`, `description`, `enabled` | Yes |
 | `opn_manage_alias` | Add/update/delete/toggle an alias (applies immediately). Params: `action`, `uuid`, `name`, `alias_type`, `content`, `description`, `enabled` | Yes |
 | `opn_manage_nat_rule` | Add/update/delete a port forward — **applies immediately, no auto-revert** (OPNsense limitation). Params: `action`, `uuid`, `interface`, `protocol`, `destination_port`, `target_ip`, `target_port`, `description`, `enabled` | Yes |
-| `opn_manage_firewall_category` | Add/delete a rule category (delete is savepoint-protected). Params: `action`, `uuid`, `name`, `color` | Yes |
-| `opn_add_icmpv6_rules` | Create the 5 essential ICMPv6 rules for IPv6 (RFC 4890) under one savepoint. Params: `interface` | Yes |
+| `opn_manage_firewall_category` | Add/delete a rule category (delete is savepoint-protected on OPNsense < 26.7). Params: `action`, `uuid`, `name`, `color` | Yes |
+| `opn_add_icmpv6_rules` | Create the 5 essential ICMPv6 rules for IPv6 (RFC 4890) under one savepoint (OPNsense < 26.7). Params: `interface` | Yes |
+
+> **Note:** Savepoint protection only exists on OPNsense < 26.7. On 26.7+ these tools apply changes immediately and permanently — see [Write Operations and Savepoints](#write-operations-and-savepoints).
 
 ### DNS (10 tools)
 
@@ -295,8 +299,8 @@ write your assistant proposes.
 
 ## Write Operations and Savepoints
 
-Write operations require `OPNSENSE_ALLOW_WRITES=true`. Firewall *filter* changes use
-OPNsense's savepoint mechanism for safety:
+Write operations require `OPNSENSE_ALLOW_WRITES=true`. On **OPNsense < 26.7**, firewall *filter* changes
+additionally go through OPNsense's savepoint mechanism:
 
 1. **Before a filter-rule or category change**, a savepoint is created automatically
 2. **The change is applied** (rule add, update, delete, or toggle)
@@ -304,8 +308,12 @@ OPNsense's savepoint mechanism for safety:
 4. **Use `opn_confirm_changes`** with the returned `revision` to make changes permanent —
    one change per savepoint (the server refuses a new savepoint while one is pending)
 
-This means if an AI assistant makes a bad firewall rule change that locks you out, the change
-will automatically revert within 60 seconds.
+On those versions, if an AI assistant makes a bad firewall rule change that locks you out, the change
+reverts automatically within 60 seconds.
+
+**OPNsense 26.7 removed the savepoint/rollback API upstream, so there is no auto-revert on 26.7+.** The server does not hardcode a version cut-off: it probes for the savepoint endpoint on the first firewall write and, if OPNsense answers that the endpoint does not exist, degrades to direct apply for the rest of the session. Check `opn_mcp_info` — its `savepoint_support` field reports `true`, `false`, or `null` if no write has probed yet. Write tools then return an empty `revision`, `opn_confirm_changes` answers with `status: "not_applicable"`, and every firewall change is immediate and permanent.
+
+> **Warning:** On OPNsense 26.7+ take a config backup (`opn_download_config`, or System > Configuration > Backups) before enabling writes, and keep out-of-band access to the box — a rule that locks you out will not revert itself.
 
 > **NAT is the exception:** OPNsense's savepoint mechanism does not cover the NAT (port
 > forward) model — `opn_manage_nat_rule` changes apply immediately and cannot be
@@ -317,7 +325,7 @@ will automatically revert within 60 seconds.
 
 ### Fully Automated via MCP
 
-- **IPv6 Firewall Rules** — Create rules with `ip_protocol="inet6"` (savepoint-protected)
+- **IPv6 Firewall Rules** — Create rules with `ip_protocol="inet6"` (savepoint-protected on OPNsense < 26.7)
 - **HAProxy IPv6 Bindings** — Frontends with `[::]:443` or `[2001:db8::1]:443` bind addresses
 - **HAProxy IPv6 Backends** — Servers with IPv6 addresses, `resolvePrefer: ipv6` on backends
 - **Dynamic DNS with IPv6** — DDNS accounts with IPv6-capable checkip methods
@@ -420,6 +428,7 @@ The server automatically detects the OPNsense version on first connection and se
 
 - The `revision` parameter must match exactly what was returned by the write operation
 - Confirmations must happen within 60 seconds or the change auto-reverts
+- On OPNsense 26.7+ there is no savepoint API: write tools return an empty `revision` and `opn_confirm_changes` returns `status: "not_applicable"`. That is expected, not a failure — the change already applied permanently
 
 ### Diagnostic Commands
 

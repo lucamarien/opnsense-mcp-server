@@ -128,7 +128,11 @@ def mock_config_cache() -> ConfigCache:
 def mock_ctx(mock_api: OPNsenseAPI, mock_config_cache: ConfigCache) -> MagicMock:
     """Create a mock FastMCP Context with the API client in lifespan_context."""
     ctx = MagicMock()
-    ctx.lifespan_context = {"api": mock_api, "config_cache": mock_config_cache}
+    ctx.lifespan_context = {
+        "api": mock_api,
+        "savepoint_mgr": SavepointManager(mock_api),
+        "config_cache": mock_config_cache,
+    }
     return ctx
 
 

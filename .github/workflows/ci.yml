@@ -43,7 +43,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --upgrade "setuptools>=83.0.0"
+          pip install -e ".[dev]"
       - name: Dependency vulnerability audit
         run: pip-audit --ignore-vuln CVE-2026-4539  # pygments ReDoS, no fix available, dev-only dep
       - name: Check for hardcoded secrets

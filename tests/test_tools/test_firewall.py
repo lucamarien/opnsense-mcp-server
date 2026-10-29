@@ -291,6 +291,113 @@ class TestManageFirewallRuleDeleteToggle:
 
 
 # ---------------------------------------------------------------------------
+# OPNsense 26.7+: no savepoint API (removed upstream in core 17b8461)
+# ---------------------------------------------------------------------------
+
+
+def _no_savepoint_flow_mock(write_result: dict | None = None) -> AsyncMock:
+    """Mock api.post for 26.7+: the savepoint probe 404s, then write → apply."""
+    return AsyncMock(
+        side_effect=[
+            OPNsenseAPIError("Endpoint not found", status_code=404),
+            write_result if write_result is not None else {"result": "saved", "uuid": "new-uuid"},
+            {"status": "ok"},  # apply
+        ]
+    )
+
+
+class TestSavepointlessWrites:
+    async def test_add_applies_directly(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = _no_savepoint_flow_mock()
+        result = await opn_manage_firewall_rule(mock_ctx_writes, action="add")
+        assert result["uuid"] == "new-uuid"
+        assert result["revision"] == ""
+        assert "opn_confirm_changes" not in result["message"]
+        assert "nothing auto-reverts" in result["message"]
+        apply_call = mock_api_writes.post.call_args_list[2]
+        assert apply_call[0][0] == "firewall.apply"
+        assert apply_call[1]["path_suffix"] == ""
+
+    async def test_probes_only_once_per_session(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[
+                OPNsenseAPIError("Endpoint not found", status_code=404),
+                {"result": "saved", "uuid": "a"},
+                {"status": "ok"},
+                {"result": "saved", "uuid": "b"},
+                {"status": "ok"},
+            ]
+        )
+        await opn_manage_firewall_rule(mock_ctx_writes, action="add")
+        result = await opn_manage_firewall_rule(mock_ctx_writes, action="add")
+        assert result["uuid"] == "b"
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == [
+            "firewall.savepoint",
+            "firewall.add_rule",
+            "firewall.apply",
+            "firewall.add_rule",
+            "firewall.apply",
+        ]
+
+    async def test_write_failure_claims_no_auto_revert(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[
+                OPNsenseAPIError("Endpoint not found", status_code=404),
+                OPNsenseAPIError("validation failed"),
+            ]
+        )
+        result = await opn_manage_firewall_rule(mock_ctx_writes, action="add")
+        assert result["error"] == "validation failed"
+        assert result["revision"] == ""
+        assert "Savepoint" not in result["message"]
+        assert "No changes were applied" in result["message"]
+
+    async def test_bare_404_keeps_the_rollback_net(self, mock_api_writes, mock_ctx_writes):
+        """A 404 without OPNsense's own body (proxy, WAF) must not degrade to unprotected writes."""
+        mock_api_writes.post = AsyncMock(side_effect=[OPNsenseAPIError("HTTP 404", status_code=404)])
+        result = await opn_manage_firewall_rule(mock_ctx_writes, action="add")
+        assert "error" in result
+        assert mock_api_writes.post.call_count == 1
+        assert mock_ctx_writes.lifespan_context["savepoint_mgr"].supported is None
+
+    async def test_confirm_is_not_applicable(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = _no_savepoint_flow_mock()
+        await opn_manage_firewall_rule(mock_ctx_writes, action="add")
+        result = await opn_confirm_changes(mock_ctx_writes, revision="")
+        assert result["status"] == "not_applicable"
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert "firewall.cancel_rollback" not in endpoints
+
+    async def test_category_delete_applies_directly(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = _no_savepoint_flow_mock({"result": "deleted"})
+        result = await opn_manage_firewall_category(mock_ctx_writes, action="delete", uuid="cat-1")
+        assert result["revision"] == ""
+        assert "nothing auto-reverts" in result["message"]
+
+    async def test_icmpv6_applies_directly(self, mock_api_writes, mock_ctx_writes):
+        responses: list = [OPNsenseAPIError("Endpoint not found", status_code=404)]
+        responses += [{"uuid": f"rule-{i}", "result": "saved"} for i in range(5)]
+        responses.append({"status": "ok"})  # apply
+        mock_api_writes.post = AsyncMock(side_effect=responses)
+        result = await opn_add_icmpv6_rules(mock_ctx_writes, interface="opt1")
+        assert result["rules_created"] == 5
+        assert result["revision"] == ""
+        assert "nothing auto-reverts" in result["message"]
+
+    async def test_icmpv6_zero_created_does_not_claim_an_apply(self, mock_api_writes, mock_ctx_writes):
+        responses: list = [OPNsenseAPIError("Endpoint not found", status_code=404)]
+        responses += [OPNsenseAPIError("boom") for _ in range(5)]
+        mock_api_writes.post = AsyncMock(side_effect=responses)
+        result = await opn_add_icmpv6_rules(mock_ctx_writes, interface="lan")
+        assert result["rules_created"] == 0
+        assert len(result["errors"]) == 5
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert "firewall.apply" not in endpoints
+        assert result["message"] == "No ICMPv6 rules were created on 'lan'. Nothing was applied."
+
+
+# ---------------------------------------------------------------------------
 # opn_manage_alias
 # ---------------------------------------------------------------------------
 

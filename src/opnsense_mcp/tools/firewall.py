@@ -2,9 +2,10 @@
 
 Surface pattern: ``opn_list_*`` for reads, ``opn_manage_*(action=...)`` for
 writes. Filter-rule and category writes are savepoint-protected (60-second
-auto-revert unless confirmed); alias writes apply immediately (metadata);
-NAT writes apply immediately because OPNsense's savepoint mechanism does not
-cover the d_nat model.
+auto-revert unless confirmed) where OPNsense still offers savepoints; 26.7
+removed them upstream, so there these writes apply immediately and permanently.
+Alias writes apply immediately (metadata); NAT writes apply immediately because
+OPNsense's savepoint mechanism does not cover the d_nat model.
 """
 
 from __future__ import annotations
@@ -28,7 +29,19 @@ _ALIAS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _CATEGORY_NAME_RE = re.compile(r"^[^,]{1,255}$")
 _HEX_COLOR_RE = re.compile(r"^[0-9a-fA-F]{6}$")
 
-_SAVEPOINT_MESSAGE = "Call opn_confirm_changes with revision '{revision}' to make permanent (60s auto-revert)."
+
+def _applied_message(revision: str, what: str) -> str:
+    """Build the success message for a write, honouring versions without savepoints."""
+    if revision:
+        return f"{what}. Call opn_confirm_changes with revision '{revision}' to make permanent (60s auto-revert)."
+    return f"{what} and applied directly. This OPNsense version has no savepoint, so nothing auto-reverts."
+
+
+def _failed_message(revision: str, what: str) -> str:
+    """Build the failure message for a write, honouring versions without savepoints."""
+    if revision:
+        return f"Savepoint created but {what} failed. Changes will auto-revert."
+    return f"{what[:1].upper()}{what[1:]} failed. No changes were applied."
 
 
 async def _savepointed_write(
@@ -40,7 +53,8 @@ async def _savepointed_write(
     """Create savepoint → write → apply. Shared flow for filter-rule writes.
 
     Returns ``(revision, api_result)`` on success, or an error envelope dict
-    when the write itself failed (the savepoint then auto-reverts).
+    when the write itself failed (the savepoint then auto-reverts). On OPNsense
+    26.7+ the revision is empty and the write is applied without rollback.
     """
     api = get_api(ctx)
     mgr = get_savepoint_manager(ctx)
@@ -52,7 +66,7 @@ async def _savepointed_write(
             "error": str(exc),
             "error_type": "api",
             "revision": revision,
-            "message": "Savepoint created but the change failed. Changes will auto-revert.",
+            "message": _failed_message(revision, "the change"),
         }
     await mgr.apply(revision)
     get_config_cache(ctx).invalidate()
@@ -217,7 +231,10 @@ async def opn_confirm_changes(ctx: Context, revision: str) -> dict[str, Any]:
     Confirming an already-confirmed or expired revision returns an error —
     if the revision expired, the change was reverted; re-do it and confirm
     within 60 seconds.
-    Returns: dict with confirmation status.
+
+    Only relevant on OPNsense < 26.7. Newer versions have no savepoint API; there
+    the write tools return an empty revision and this call is a no-op.
+    Returns: dict with confirmation status, or status 'not_applicable'.
     """
     mgr = get_savepoint_manager(ctx)
     return await mgr.confirm(revision)
@@ -253,10 +270,14 @@ async def opn_manage_firewall_rule(
     description: str | None = None,
     enabled: bool | None = None,
 ) -> dict[str, Any]:
-    """Add, update, delete, or toggle an MVC firewall filter rule (savepoint-protected).
+    """Add, update, delete, or toggle an MVC firewall filter rule (savepoint-protected where supported).
 
-    All changes auto-revert in 60 seconds unless confirmed with
+    On OPNsense < 26.7 all changes auto-revert in 60 seconds unless confirmed with
     opn_confirm_changes — one change per savepoint: change → confirm → next.
+    OPNsense 26.7 removed the savepoint API upstream: there changes apply
+    immediately, are NOT rolled back automatically, and 'revision' is empty.
+    Check opn_mcp_info first: if 'savepoint_support' is false, take a config
+    backup with opn_download_config before changing rules that could lock you out.
     Creates/edits MVC rules (Settings > Firewall > Automation), not legacy GUI rules.
 
     Actions:
@@ -266,7 +287,8 @@ async def opn_manage_firewall_rule(
       sequence=1, enabled=True).
     - 'update': modify the rule identified by uuid. Only the parameters you
       provide are changed; others are preserved.
-    - 'delete': remove the rule identified by uuid. Permanent after confirm.
+    - 'delete': remove the rule identified by uuid. Permanent after confirm
+      (immediately on 26.7+).
     - 'toggle': flip the enabled/disabled state of the rule identified by uuid.
 
     Parameters (rule fields, used by add/update):
@@ -287,8 +309,8 @@ async def opn_manage_firewall_rule(
     - enabled: enable/disable the rule
 
     Use opn_list_firewall_rules first to find UUIDs for update/delete/toggle.
-    Returns: dict with 'revision' (str, pass to opn_confirm_changes), 'uuid'
-    (str), and 'message' (str). On failure: 'error' and 'error_type'.
+    Returns: dict with 'revision' (str, pass to opn_confirm_changes; empty on
+    26.7+), 'uuid' (str), and 'message' (str). On failure: 'error' and 'error_type'.
     """
     if action in ("update", "delete", "toggle") and not uuid:
         return {"error": f"uuid is required for action '{action}'", "error_type": "validation"}
@@ -301,7 +323,7 @@ async def opn_manage_firewall_rule(
         return {
             "revision": revision,
             "uuid": uuid,
-            "message": f"Rule toggled. {_SAVEPOINT_MESSAGE.format(revision=revision)}",
+            "message": _applied_message(revision, "Rule toggled"),
         }
 
     if action == "delete":
@@ -313,7 +335,7 @@ async def opn_manage_firewall_rule(
             "revision": revision,
             "uuid": uuid,
             "result": result.get("result", ""),
-            "message": f"Rule deleted. {_SAVEPOINT_MESSAGE.format(revision=revision)}",
+            "message": _applied_message(revision, "Rule deleted"),
         }
 
     # add / update — build the rule payload from provided fields
@@ -381,7 +403,7 @@ async def opn_manage_firewall_rule(
             "revision": revision,
             "uuid": result.get("uuid", ""),
             "result": result.get("result", ""),
-            "message": f"Rule created. {_SAVEPOINT_MESSAGE.format(revision=revision)}",
+            "message": _applied_message(revision, "Rule created"),
         }
 
     # update
@@ -393,7 +415,7 @@ async def opn_manage_firewall_rule(
         "revision": revision,
         "uuid": uuid,
         "result": result.get("result", ""),
-        "message": f"Rule updated. {_SAVEPOINT_MESSAGE.format(revision=revision)}",
+        "message": _applied_message(revision, "Rule updated"),
     }
 
 
@@ -612,8 +634,9 @@ async def opn_manage_firewall_category(
     """Add or delete a firewall rule category.
 
     Categories are metadata for organizing rules — creating one does not
-    affect traffic. Deletion is savepoint-protected (60s auto-revert unless
-    confirmed with opn_confirm_changes); reassign rules to other categories
+    affect traffic. Deletion is savepoint-protected where supported (60s
+    auto-revert unless confirmed with opn_confirm_changes; immediate on OPNsense
+    26.7+, which removed savepoints); reassign rules to other categories
     BEFORE deleting to avoid orphaned references. System default categories
     (auto=1) cannot be deleted.
 
@@ -627,7 +650,7 @@ async def opn_manage_firewall_category(
 
     Use opn_list_firewall_categories first to find UUIDs.
     Returns: add → dict with 'result', 'uuid', 'name'; delete → dict with
-    'revision' (pass to opn_confirm_changes) and 'result'.
+    'revision' (pass to opn_confirm_changes; empty on 26.7+) and 'result'.
     """
     if action == "add":
         if not name or not _CATEGORY_NAME_RE.match(name):
@@ -664,7 +687,7 @@ async def opn_manage_firewall_category(
         "revision": revision,
         "uuid": uuid,
         "result": result.get("result", ""),
-        "message": f"Category deleted. {_SAVEPOINT_MESSAGE.format(revision=revision)}",
+        "message": _applied_message(revision, "Category deleted"),
     }
 
 
@@ -719,14 +742,16 @@ async def opn_add_icmpv6_rules(
     IPv6 — without it, Neighbor Discovery (NDP), Router Advertisements (RA),
     and Path MTU Discovery (PMTUD) all break.
 
-    Creates 5 rules per RFC 4890 under ONE savepoint:
+    Creates 5 rules per RFC 4890 under ONE savepoint (where supported):
     1. NDP Neighbor Solicitation (link-local -> multicast)
     2. NDP Neighbor Advertisement (link-local -> any)
     3. NDP Router Solicitation (link-local -> all-routers multicast)
     4. NDP Router Advertisement (link-local -> all-nodes multicast)
     5. ICMPv6 Echo (ping6) inbound
 
-    Auto-reverts in 60 seconds unless confirmed with opn_confirm_changes.
+    On OPNsense < 26.7 this auto-reverts in 60 seconds unless confirmed with
+    opn_confirm_changes. On 26.7+ (no savepoint API) the rules apply immediately;
+    if some fail, the ones created stay in place.
 
     Parameters:
     - interface: target interface (e.g. 'lan', 'opt1', 'opt2')
@@ -773,7 +798,8 @@ async def opn_add_icmpv6_rules(
         "errors": errors,
         "interface": interface,
         "message": (
-            f"Created {len(created_uuids)} ICMPv6 rules on '{interface}'. "
-            f"{_SAVEPOINT_MESSAGE.format(revision=revision)}"
+            _applied_message(revision, f"Created {len(created_uuids)} ICMPv6 rules on '{interface}'")
+            if created_uuids
+            else f"No ICMPv6 rules were created on '{interface}'. Nothing was applied."
         ),
     }

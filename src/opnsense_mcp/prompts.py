@@ -21,8 +21,9 @@ Follow this sequence, confirming with the user before each write step:
    Ask the user to confirm both before continuing. Verify with opn_ipv6_status.
 
 2. ICMPv6 RULES (mandatory — IPv6 breaks without NDP/RA/PMTUD):
-   Call opn_add_icmpv6_rules(interface='{lan_interface}'), then
-   opn_confirm_changes with the returned revision within 60 seconds.
+   Call opn_add_icmpv6_rules(interface='{lan_interface}'). If it returns a
+   non-empty revision, call opn_confirm_changes with it within 60 seconds; an
+   empty revision means OPNsense 26.7+ (no savepoints) and the rules are live.
 
 3. ROUTER ADVERTISEMENTS via dnsmasq:
    Check opn_list_dnsmasq_ranges for an existing IPv6 range on '{lan_interface}'.
@@ -96,8 +97,8 @@ def remediate_audit(max_findings: int = 5) -> str:
    that are quick wins. For each, explain the risk in one sentence and the
    exact tool call that fixes it, for example:
    - permissive/broad rules -> opn_manage_firewall_rule(action='update', ...)
-     to narrow source/destination/ports (savepoint-protected; confirm with
-     opn_confirm_changes within 60s)
+     to narrow source/destination/ports (savepoint-protected on OPNsense < 26.7:
+     confirm with opn_confirm_changes within 60s; on 26.7+ it applies immediately)
    - dangerous NAT exposure -> opn_manage_nat_rule(action='update'|'delete')
      (applies immediately — no auto-revert; confirm with the user first)
    - DNSSEC disabled / plaintext forwarders -> explain the GUI path; the MCP

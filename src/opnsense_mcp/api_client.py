@@ -424,6 +424,9 @@ ENDPOINT_REGISTRY: dict[str, tuple[str, str]] = {
 
 _VERSION_THRESHOLD = (25, 7)
 
+# OPNsense release that removed the firewall savepoint/rollback actions (core 17b8461).
+_SAVEPOINTS_REMOVED_IN = (26, 7)
+
 
 class OPNsenseAPIError(Exception):
     """Raised when the OPNsense API returns an error."""
@@ -443,6 +446,23 @@ class WriteDisabledError(OPNsenseAPIError):
 
 class SavepointError(OPNsenseAPIError):
     """Raised when a savepoint operation fails."""
+
+
+def _is_missing_endpoint(exc: OPNsenseAPIError, detected_version: tuple[int, int] | None) -> bool:
+    """Whether an API error is OPNsense reporting that the endpoint does not exist.
+
+    OPNsense answers an unrouted API path with HTTP 404 and an "Endpoint not found"
+    body (www/api.php). A bare 404 alone is not accepted as proof — a reverse proxy,
+    WAF or maintenance page produces the same status, and treating that as "this
+    version has no savepoints" would silently strip the rollback net on a firewall
+    that still offers it. The body text is localised via gettext, so a 404 on a
+    version known to have dropped the endpoint counts as corroboration instead.
+    """
+    if exc.status_code != 404:
+        return False
+    if "endpoint not found" in str(exc).lower():
+        return True
+    return detected_version is not None and detected_version >= _SAVEPOINTS_REMOVED_IN
 
 
 class OPNsenseAPI:
@@ -720,11 +740,23 @@ class OPNsenseAPI:
         return f"HTTP {response.status_code}"
 
 
+SAVEPOINTS_REMOVED_MESSAGE = (
+    "This OPNsense version no longer provides the firewall savepoint API "
+    "(removed upstream in 26.7). Changes are applied directly and there is "
+    "no 60-second auto-revert."
+)
+
+
 class SavepointManager:
     """Manages OPNsense firewall savepoint lifecycle.
 
     Provides atomic firewall changes with automatic 60-second rollback.
     Flow: create() → [make changes] → apply() → confirm() or auto-revert.
+
+    OPNsense 26.7 removed the savepoint/rollback actions from the filter API
+    (core commit 17b8461); applyAction no longer accepts a revision either.
+    The manager probes once on first write and then degrades to direct-apply
+    mode, so writes keep working — without a rollback net.
     """
 
     # OPNsense auto-reverts unconfirmed changes after 60 s; allow slack
@@ -735,6 +767,12 @@ class SavepointManager:
         self._api = api
         self._active_revision: str | None = None
         self._applied_at: float | None = None
+        self._supported: bool | None = None
+
+    @property
+    def supported(self) -> bool | None:
+        """Whether savepoints exist on this OPNsense, or None if not probed."""
+        return self._supported
 
     async def create(self) -> str:
         """Create a firewall savepoint.
@@ -745,7 +783,8 @@ class SavepointManager:
         revision could revert later changes along with its own.
 
         Returns:
-            The revision UUID for this savepoint.
+            The revision UUID, or an empty string when this OPNsense version
+            has no savepoint API (callers then run without rollback).
 
         Raises:
             WriteDisabledError: If writes are disabled.
@@ -753,6 +792,9 @@ class SavepointManager:
                 savepoint is still pending confirmation.
         """
         self._api.require_writes()
+        if self._supported is False:
+            return ""
+
         if self._active_revision is not None and self._applied_at is not None:
             elapsed = time.monotonic() - self._applied_at
             if elapsed < self.PENDING_WINDOW_SECONDS:
@@ -765,19 +807,31 @@ class SavepointManager:
             # Window passed — the old revision auto-reverted; forget it.
             self._active_revision = None
             self._applied_at = None
-        result = await self._api.post("firewall.savepoint")
+
+        try:
+            result = await self._api.post("firewall.savepoint")
+        except OPNsenseAPIError as exc:
+            # Only the first probe may degrade. Once savepoints are known to work,
+            # a later failure is a real error, not a version difference.
+            if self._supported is not None or not _is_missing_endpoint(exc, self._api.detected_version):
+                raise
+            self._supported = False
+            return ""
+
         revision = result.get("revision", "")
         if not isinstance(revision, str) or not revision:
             msg = "Savepoint creation returned no revision"
             raise SavepointError(msg)
+        self._supported = True
         self._active_revision = revision
         return revision
 
     async def apply(self, revision: str) -> dict[str, Any]:
-        """Apply firewall changes with 60-second auto-revert timer.
+        """Apply firewall changes, with 60-second auto-revert where supported.
 
         Args:
-            revision: The savepoint revision UUID.
+            revision: The savepoint revision UUID, or an empty string to apply
+                without a rollback timer (OPNsense 26.7+).
 
         Returns:
             API response dict.
@@ -798,13 +852,26 @@ class SavepointManager:
             revision: The savepoint revision UUID.
 
         Returns:
-            API response dict.
+            API response dict, or a no-op status on versions without savepoints.
 
         Raises:
             WriteDisabledError: If writes are disabled.
         """
         self._api.require_writes()
-        result = await self._api.post("firewall.cancel_rollback", path_suffix=revision)
+        if self._supported is False or not revision:
+            return {"status": "not_applicable", "message": SAVEPOINTS_REMOVED_MESSAGE}
+
+        try:
+            result = await self._api.post("firewall.cancel_rollback", path_suffix=revision)
+        except OPNsenseAPIError as exc:
+            # If a savepoint was proven to work this session, a rollback timer may be
+            # armed right now. Raising is the only honest answer — reporting
+            # "not_applicable" here would claim permanence while the change reverts.
+            if self._supported is not None or not _is_missing_endpoint(exc, self._api.detected_version):
+                raise
+            self._supported = False
+            return {"status": "not_applicable", "message": SAVEPOINTS_REMOVED_MESSAGE}
+
         if self._active_revision == revision:
             self._active_revision = None
             self._applied_at = None

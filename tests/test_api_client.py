@@ -430,6 +430,14 @@ class TestPathSuffix:
         await api.post("firewall.apply", path_suffix="abc123")
         mock_httpx_client.post.assert_called_once_with("/firewall/filter/apply/abc123", json=None)
 
+    async def test_post_with_empty_suffix_appends_nothing(self, mock_config_writes, mock_httpx_client):
+        """OPNsense 26.7+ applies without a revision — the URL must have no trailing segment."""
+        post_resp = _make_response(json_data={"status": "ok"})
+        mock_httpx_client.post.return_value = post_resp
+        api = _make_api_with_version(mock_config_writes, mock_httpx_client, (26, 7))
+        await api.post("firewall.apply", path_suffix="")
+        mock_httpx_client.post.assert_called_once_with("/firewall/filter/apply", json=None)
+
     async def test_suffix_checked_against_blocklist(self, mock_config_writes, mock_httpx_client):
         api = _make_api_with_version(mock_config_writes, mock_httpx_client, (25, 1))
         ENDPOINT_REGISTRY["_test_suffix"] = ("core/system/halt", "core/system/halt")
@@ -522,6 +530,140 @@ class TestSavepointManager:
     def test_initial_active_revision_is_none(self, mock_api_writes):
         mgr = SavepointManager(mock_api_writes)
         assert mgr.active_revision is None
+
+    # --- OPNsense 26.7+ (savepoint API removed upstream) ---
+
+    async def test_create_degrades_on_missing_endpoint(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        mgr = SavepointManager(mock_api_writes)
+        assert await mgr.create() == ""
+        assert mgr.supported is False
+        assert mgr.active_revision is None
+
+    async def test_create_does_not_degrade_without_404(self, mock_api_writes):
+        """A savepoint message without OPNsense's 404 is not proof the endpoint is gone."""
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found"))
+        mgr = SavepointManager(mock_api_writes)
+        with pytest.raises(OPNsenseAPIError):
+            await mgr.create()
+        assert mgr.supported is None
+
+    async def test_create_does_not_degrade_on_bare_proxy_404(self, mock_api_writes):
+        """A proxy 404 on a pre-26.7 box must not silently strip the rollback net."""
+        assert mock_api_writes.detected_version == (25, 1)
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("HTTP 404", status_code=404))
+        mgr = SavepointManager(mock_api_writes)
+        with pytest.raises(OPNsenseAPIError, match="HTTP 404"):
+            await mgr.create()
+        assert mgr.supported is None
+
+    async def test_create_degrades_on_bare_404_when_version_removed_it(self, mock_api_writes):
+        """Localised error bodies won't match the marker; the detected version corroborates."""
+        mock_api_writes._detected_version = (26, 7)
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpunkt nicht gefunden", status_code=404))
+        mgr = SavepointManager(mock_api_writes)
+        assert await mgr.create() == ""
+        assert mgr.supported is False
+
+    async def test_create_does_not_degrade_on_405(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Method Not Allowed", status_code=405))
+        mgr = SavepointManager(mock_api_writes)
+        with pytest.raises(OPNsenseAPIError):
+            await mgr.create()
+        assert mgr.supported is None
+
+    async def test_create_reraises_404_once_savepoints_are_known_to_work(self, mock_api_writes):
+        """A transient 404 after a proven savepoint is an error, not a version difference."""
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-1"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        assert mgr.supported is True
+
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        with pytest.raises(OPNsenseAPIError, match="Endpoint not found"):
+            await mgr.create()
+        assert mgr.supported is True
+
+    async def test_confirm_reraises_404_while_a_rollback_timer_may_be_armed(self, mock_api_writes):
+        """Never answer 'not_applicable' when a savepoint of this session could still revert."""
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-1"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        with pytest.raises(OPNsenseAPIError, match="Endpoint not found"):
+            await mgr.confirm("rev-1")
+        assert mgr.supported is True
+        assert mgr.active_revision == "rev-1"
+
+    async def test_create_skips_probe_once_unsupported(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        await mgr.create()
+        assert mock_api_writes.post.await_count == 1
+
+    async def test_create_reraises_unrelated_api_error(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Internal error", status_code=500))
+        mgr = SavepointManager(mock_api_writes)
+        with pytest.raises(OPNsenseAPIError, match="Internal error"):
+            await mgr.create()
+        assert mgr.supported is None
+
+    async def test_create_marks_supported_on_success(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(return_value={"revision": "rev-abc-123"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        assert mgr.supported is True
+
+    async def test_apply_without_revision_sends_no_suffix(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(return_value={"status": "ok"})
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.apply("")
+        mock_api_writes.post.assert_called_once_with("firewall.apply", path_suffix="")
+
+    async def test_confirm_is_noop_when_unsupported(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        mgr = SavepointManager(mock_api_writes)
+        await mgr.create()
+        mock_api_writes.post.reset_mock()
+        result = await mgr.confirm("rev-abc-123")
+        assert result["status"] == "not_applicable"
+        mock_api_writes.post.assert_not_called()
+
+    async def test_confirm_is_noop_on_empty_revision(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(return_value={"status": "ok"})
+        mgr = SavepointManager(mock_api_writes)
+        result = await mgr.confirm("")
+        assert result["status"] == "not_applicable"
+        mock_api_writes.post.assert_not_called()
+
+    async def test_confirm_degrades_on_missing_endpoint(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        mgr = SavepointManager(mock_api_writes)
+        result = await mgr.confirm("rev-abc-123")
+        assert result["status"] == "not_applicable"
+        assert mgr.supported is False
+
+    async def test_confirm_reraises_unrelated_api_error(self, mock_api_writes):
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Internal error", status_code=500))
+        mgr = SavepointManager(mock_api_writes)
+        with pytest.raises(OPNsenseAPIError, match="Internal error"):
+            await mgr.confirm("rev-abc-123")
+
+    async def test_lifecycle_without_savepoints(self, mock_api_writes):
+        """OPNsense 26.7+: create degrades, apply runs bare, confirm is a no-op."""
+        mgr = SavepointManager(mock_api_writes)
+
+        mock_api_writes.post = AsyncMock(side_effect=OPNsenseAPIError("Endpoint not found", status_code=404))
+        revision = await mgr.create()
+        assert revision == ""
+
+        mock_api_writes.post = AsyncMock(return_value={"status": "applied"})
+        assert await mgr.apply(revision) == {"status": "applied"}
+        mock_api_writes.post.assert_called_once_with("firewall.apply", path_suffix="")
+
+        assert (await mgr.confirm(revision))["status"] == "not_applicable"
 
     async def test_full_lifecycle(self, mock_api_writes):
         """Test create → apply → confirm flow."""
