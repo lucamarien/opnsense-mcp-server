@@ -26,8 +26,9 @@ SENSITIVE_TAGS: frozenset[str] = frozenset(
         "authorizedkeys",  # system/user SSH keys
         "otp_seed",  # system/user TOTP seed
         "tls",  # legacy OpenVPN tls-auth/tls-crypt static key
-        "keys",  # wireless WEP keys
+        "keys",  # wireless WEP keys (also blanks the system/ssh/keys algorithm list)
         "keydata",  # RFC 2136 TSIG secret
+        "simpin",  # PPP SIM PIN
         "community",  # net-snmp community (also blanks BGP community values)
         "eab_hmac",  # ACME external account binding
         "basicauthpass",  # Caddy basic auth

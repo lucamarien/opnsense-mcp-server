@@ -67,6 +67,12 @@
       <auth_pass>CANARY-openvpn-auth-pass</auth_pass>
     </openvpn-client>
   </openvpn>
+  <ppps>
+    <ppp>
+      <ports>VISIBLE-ppp-ports</ports>
+      <simpin>CANARY-ppp-simpin</simpin>
+    </ppp>
+  </ppps>
   <ipsec>
     <phase1>
       <pre-shared-key>CANARY-ipsec-pre-shared-key</pre-shared-key>

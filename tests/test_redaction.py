@@ -29,6 +29,7 @@ _PREVIOUSLY_MISSED = (
     "tls",
     "auth_pass",
     "keydata",
+    "simpin",
     "psk",
     "encryptionpsk",
     "community",
