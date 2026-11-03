@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from opnsense_mcp.config_cache import ConfigCache, _strip_sensitive, _xml_to_dict
+from opnsense_mcp.config_cache import ConfigCache, _strip_sensitive, _xml_to_dict, is_sensitive_tag
 
 
 class TestXmlToDict:
@@ -86,6 +86,36 @@ class TestStripSensitive:
         result = _strip_sensitive(data)
         # SENSITIVE_TAGS are lowercase, matching is by .lower()
         assert result["Password"] == "[REDACTED]"
+
+
+class TestSensitiveTagPatterns:
+    """Tests for is_sensitive_tag (exact names, substrings, *key suffix, allowlist)."""
+
+    def test_exact_tags_still_match(self):
+        for tag in ("password", "key", "secret", "pre-shared-key"):
+            assert is_sensitive_tag(tag)
+
+    def test_substring_patterns(self):
+        assert is_sensitive_tag("radius_secret2")
+        assert is_sensitive_tag("proxy_passwd")
+        assert is_sensitive_tag("api_token")
+        assert is_sensitive_tag("apikey")
+        assert is_sensitive_tag("cf_credentials")
+
+    def test_key_suffix_redacted_unless_public(self):
+        assert is_sensitive_tag("authkey")
+        assert is_sensitive_tag("sharedkey")
+        assert is_sensitive_tag("hostkey")
+        assert not is_sensitive_tag("pubkey")
+        assert not is_sensitive_tag("publickey")
+
+    def test_benign_tags_untouched(self):
+        for tag in ("hostname", "descr", "interfaces", "enabled", "keyboard"):
+            assert not is_sensitive_tag(tag)
+
+    def test_allowlisted_flags_not_redacted(self):
+        assert not is_sensitive_tag("passwordauth")
+        assert not is_sensitive_tag("nopasswd")
 
 
 class TestConfigCache:
