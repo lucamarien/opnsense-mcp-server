@@ -8,20 +8,28 @@ from typing import Any
 from fastmcp import Context
 
 from opnsense_mcp import __version__
-from opnsense_mcp.config_cache import SENSITIVE_TAGS
+from opnsense_mcp.config_cache import is_sensitive_tag
 from opnsense_mcp.server import get_api, get_config_cache, get_savepoint_manager, mcp
 
 
-def _strip_sensitive_data(xml_text: str) -> str:
-    """Replace sensitive element text with [REDACTED] in config XML."""
+def _strip_sensitive_data(xml_text: str) -> str | None:
+    """Replace sensitive element text with [REDACTED] in config XML.
+
+    Returns None when the XML cannot be parsed: text that cannot be parsed
+    cannot be redacted, so the caller must refuse instead of passing it on.
+    """
     try:
         # Source is trusted (OPNsense API response), not user input
         root = ET.fromstring(xml_text)  # noqa: S314
     except ET.ParseError:
-        return xml_text
+        return None
 
-    for elem in root.iter():
-        if elem.tag.lower() in SENSITIVE_TAGS and elem.text:
+    # Blank the whole element, as the parsed-section path does: a matching
+    # container must not keep children or attributes whose names look harmless.
+    for elem in [e for e in root.iter() if is_sensitive_tag(e.tag)]:
+        if elem.text or len(elem) or elem.attrib:
+            del elem[:]
+            elem.attrib.clear()
             elem.text = "[REDACTED]"
 
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
@@ -82,14 +90,22 @@ async def opn_download_config(
     For analyzing specific config sections, use opn_scan_config to build a
     cached inventory, then opn_get_config_section to query individual sections.
 
-    By default, sensitive data (passwords, keys, secrets) is redacted.
-    Returns: dict with 'config_xml' (str), 'stripped' (bool), 'size_bytes' (int).
+    By default, sensitive data (passwords, keys, secrets) is redacted; a config
+    that cannot be parsed for redaction is refused, never returned raw.
+    Returns: dict with 'config_xml' (str), 'stripped' (bool), 'size_bytes' (int),
+    or 'error'/'error_type' when the config cannot be parsed.
     """
     api = get_api(ctx)
     xml_text = await api.get_text("core.backup.download")
 
     if not include_sensitive:
-        xml_text = _strip_sensitive_data(xml_text)
+        stripped = _strip_sensitive_data(xml_text)
+        if stripped is None:
+            return {
+                "error": "config.xml could not be parsed, so it cannot be redacted; refusing to return it.",
+                "error_type": "unparseable_config",
+            }
+        xml_text = stripped
 
     return {
         "config_xml": xml_text,

@@ -9,7 +9,7 @@ from typing import Any
 
 from opnsense_mcp.api_client import OPNsenseAPI, OPNsenseAPIError
 
-# Sensitive XML elements redacted by default
+# Sensitive XML elements redacted by default (exact tag names)
 SENSITIVE_TAGS: frozenset[str] = frozenset(
     {
         "password",
@@ -21,8 +21,67 @@ SENSITIVE_TAGS: frozenset[str] = frozenset(
         "privatekey",
         "certdata",
         "shared_secret",
+        # Too generic for a substring rule, but secret where OPNsense uses them
+        # (checked against opnsense/core and opnsense/plugins, 2026-11)
+        "authorizedkeys",  # system/user SSH keys
+        "otp_seed",  # system/user TOTP seed
+        "tls",  # legacy OpenVPN tls-auth/tls-crypt static key
+        "keys",  # wireless WEP keys (also blanks the system/ssh/keys algorithm list)
+        "keydata",  # RFC 2136 TSIG secret
+        "simpin",  # PPP SIM PIN
+        "community",  # net-snmp community (also blanks BGP community values)
+        "eab_hmac",  # ACME external account binding
+        "basicauthpass",  # Caddy basic auth
+        "dns_kas_authdata",  # ACME KAS DNS API
     }
 )
+
+# Substring patterns — a denylist of exact names inevitably misses
+# plugin-specific fields, so any tag containing one of these is redacted too.
+_SENSITIVE_SUBSTRINGS: tuple[str, ...] = (
+    "password",
+    "passwd",
+    "secret",
+    "credential",
+    "token",
+    "apikey",
+    "api_key",
+    "authkey",
+    "presharedkey",
+    "pre-shared",
+    "psk",
+    "passphrase",
+    "prv",
+)
+
+# Password fields that avoid the word (auth_pass, ldap_bindpw, dns_netcup_pw).
+# A bare "pass" suffix would also catch the bypass/pass flags.
+_SENSITIVE_SUFFIXES: tuple[str, ...] = ("_pass", "pw")
+
+# Boolean/setting flags that match a pattern but carry no secret value.
+# (e.g. the security audit must be able to read ssh.passwordauth.)
+_SENSITIVE_ALLOWLIST: frozenset[str] = frozenset({"passwordauth", "nopasswd"})
+
+
+def is_sensitive_tag(tag: str) -> bool:
+    """Return True if a config XML tag name should be redacted.
+
+    Matches exact known tags, sensitive substrings, password suffixes
+    (``*_pass``, ``*pw``), and any ``*key`` tag that is not explicitly
+    public (pubkey/publickey). Known non-secret flag names (passwordauth,
+    nopasswd) are allowlisted.
+    """
+    lower = tag.lower()
+    if lower in _SENSITIVE_ALLOWLIST:
+        return False
+    if lower in SENSITIVE_TAGS:
+        return True
+    if any(s in lower for s in _SENSITIVE_SUBSTRINGS):
+        return True
+    if lower.endswith(_SENSITIVE_SUFFIXES):
+        return True
+    return lower.endswith("key") and "pub" not in lower
+
 
 _ZENARMOR_PREFIXES = ("os-sensei", "os-sunnyvalley")
 
@@ -62,7 +121,7 @@ def _xml_to_dict(elem: ET.Element) -> dict[str, Any] | str:
 def _strip_sensitive(data: dict[str, Any] | list[Any] | str) -> dict[str, Any] | list[Any] | str:
     """Recursively redact sensitive values in a parsed config dict."""
     if isinstance(data, dict):
-        return {k: "[REDACTED]" if k.lower() in SENSITIVE_TAGS else _strip_sensitive(v) for k, v in data.items()}
+        return {k: "[REDACTED]" if is_sensitive_tag(k) else _strip_sensitive(v) for k, v in data.items()}
     if isinstance(data, list):
         return [_strip_sensitive(item) for item in data]
     return data
