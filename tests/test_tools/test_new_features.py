@@ -121,6 +121,13 @@ class TestTrafficTop:
         mock_api.get.assert_called_once_with("diagnostics.traffic.top", path_suffix="lan,wan")
         assert "lan" in result
 
+    async def test_spaces_around_names_are_dropped(self, mock_api, mock_ctx):
+        # The path_suffix validator only accepts one plain segment, so "lan, wan"
+        # must not reach the client with the space in it.
+        mock_api.get = AsyncMock(return_value={})
+        await opn_traffic_top(mock_ctx, interfaces=" lan, wan ")
+        mock_api.get.assert_called_once_with("diagnostics.traffic.top", path_suffix="lan,wan")
+
     async def test_empty_interfaces_rejected(self, mock_ctx):
         result = await opn_traffic_top(mock_ctx, interfaces="  ")
         assert result["error_type"] == "validation"

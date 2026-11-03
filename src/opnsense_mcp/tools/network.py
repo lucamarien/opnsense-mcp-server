@@ -354,10 +354,11 @@ async def opn_traffic_top(
     Returns: dict keyed by interface name, each a list of host traffic
     records (address, rate in/out, total bytes).
     """
-    if not interfaces.strip():
+    names = ",".join(n.strip() for n in interfaces.split(",") if n.strip())
+    if not names:
         return {"error": "interfaces must not be empty", "error_type": "validation"}
     api = get_api(ctx)
-    return await api.get("diagnostics.traffic.top", path_suffix=interfaces.strip())
+    return await api.get("diagnostics.traffic.top", path_suffix=names)
 
 
 @mcp.tool(annotations=READ_ONLY)
