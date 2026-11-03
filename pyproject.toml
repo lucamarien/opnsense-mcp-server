@@ -1,6 +1,6 @@
 [project]
 name = "opnsense-mcp-server"
-version = "0.4.1"
+version = "0.4.2"
 description = "Secure MCP server for OPNsense firewall management via AI assistants"
 readme = "README.md"
 license = "MIT"
