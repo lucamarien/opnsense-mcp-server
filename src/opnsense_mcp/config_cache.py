@@ -21,6 +21,17 @@ SENSITIVE_TAGS: frozenset[str] = frozenset(
         "privatekey",
         "certdata",
         "shared_secret",
+        # Too generic for a substring rule, but secret where OPNsense uses them
+        # (checked against opnsense/core and opnsense/plugins, 2026-11)
+        "authorizedkeys",  # system/user SSH keys
+        "otp_seed",  # system/user TOTP seed
+        "tls",  # legacy OpenVPN tls-auth/tls-crypt static key
+        "keys",  # wireless WEP keys
+        "keydata",  # RFC 2136 TSIG secret
+        "community",  # net-snmp community (also blanks BGP community values)
+        "eab_hmac",  # ACME external account binding
+        "basicauthpass",  # Caddy basic auth
+        "dns_kas_authdata",  # ACME KAS DNS API
     }
 )
 
@@ -37,7 +48,14 @@ _SENSITIVE_SUBSTRINGS: tuple[str, ...] = (
     "authkey",
     "presharedkey",
     "pre-shared",
+    "psk",
+    "passphrase",
+    "prv",
 )
+
+# Password fields that avoid the word (auth_pass, ldap_bindpw, dns_netcup_pw).
+# A bare "pass" suffix would also catch the bypass/pass flags.
+_SENSITIVE_SUFFIXES: tuple[str, ...] = ("_pass", "pw")
 
 # Boolean/setting flags that match a pattern but carry no secret value.
 # (e.g. the security audit must be able to read ssh.passwordauth.)
@@ -47,9 +65,10 @@ _SENSITIVE_ALLOWLIST: frozenset[str] = frozenset({"passwordauth", "nopasswd"})
 def is_sensitive_tag(tag: str) -> bool:
     """Return True if a config XML tag name should be redacted.
 
-    Matches exact known tags, sensitive substrings, and any ``*key`` tag
-    that is not explicitly public (pubkey/publickey). Known non-secret
-    flag names (passwordauth, nopasswd) are allowlisted.
+    Matches exact known tags, sensitive substrings, password suffixes
+    (``*_pass``, ``*pw``), and any ``*key`` tag that is not explicitly
+    public (pubkey/publickey). Known non-secret flag names (passwordauth,
+    nopasswd) are allowlisted.
     """
     lower = tag.lower()
     if lower in _SENSITIVE_ALLOWLIST:
@@ -57,6 +76,8 @@ def is_sensitive_tag(tag: str) -> bool:
     if lower in SENSITIVE_TAGS:
         return True
     if any(s in lower for s in _SENSITIVE_SUBSTRINGS):
+        return True
+    if lower.endswith(_SENSITIVE_SUFFIXES):
         return True
     return lower.endswith("key") and "pub" not in lower
 
