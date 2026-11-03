@@ -100,6 +100,7 @@ The following endpoints are **permanently blocked** at the API client level and 
 
 - `core/system/halt` — shuts down the firewall instantly
 - `core/system/reboot` — reboots instantly
+- `core/firmware/reboot` — reboots instantly (firmware controller twin of `core/system/reboot`)
 - `core/firmware/poweroff` — powers off instantly
 - `core/firmware/update` — triggers system update
 - `core/firmware/upgrade` — triggers major upgrade

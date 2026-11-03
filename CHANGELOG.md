@@ -20,6 +20,8 @@ This project follows [Semantic Versioning](https://semver.org/).
   no longer request unredacted secrets on its own. **Behaviour change** for setups that
   relied on the parameter alone. Reported by @PaulWaldo in #6.
 - Hostname validation for the diagnostics tools also rejects tab characters (#6).
+- `core/firmware/reboot` is blocklisted too: it reboots the firewall like
+  `core/system/reboot`, which was the only reboot endpoint on the list.
 - **Config redaction failed open:** `opn_download_config` returned the original,
   unredacted config.xml whenever it could not parse it, while still reporting
   `stripped: true`. It now refuses with `error_type: unparseable_config`.
