@@ -125,14 +125,27 @@ class TestOpnDownloadConfig:
         assert "test-api-key" in result["config_xml"]
         assert "[REDACTED]" not in result["config_xml"]
 
-    async def test_handles_malformed_xml(self, mock_api, mock_ctx):
-        malformed = "<opnsense><unclosed>"
+    async def test_refuses_malformed_xml(self, mock_api, mock_ctx):
+        malformed = "<opnsense><system><password>hunter2</password><unclosed>"
         mock_api.get_text = AsyncMock(return_value=malformed)
 
         result = await opn_download_config(mock_ctx)
 
+        assert result["error_type"] == "unparseable_config"
+        assert "config_xml" not in result
+        assert "hunter2" not in str(result)
+
+    async def test_include_sensitive_passes_malformed_xml_through(self, mock_api, mock_ctx):
+        import dataclasses
+
+        mock_api._config = dataclasses.replace(mock_api.config, allow_sensitive=True)
+        malformed = "<opnsense><unclosed>"
+        mock_api.get_text = AsyncMock(return_value=malformed)
+
+        result = await opn_download_config(mock_ctx, include_sensitive=True)
+
         assert result["config_xml"] == malformed
-        assert result["stripped"] is True
+        assert result["stripped"] is False
 
     async def test_returns_metadata(self, mock_api, mock_ctx):
         mock_api.get_text = AsyncMock(return_value="<opnsense />")

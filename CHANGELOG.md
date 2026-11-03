@@ -48,6 +48,16 @@ Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
   (credentials travel as Basic Auth).
 - Pattern-based secret redaction (substrings + `*key` suffix) replaces the
   9-name exact list; non-secret flags (passwordauth) allowlisted.
+- Redaction extended for tags the patterns still missed (merged from main):
+  cert/CA `prv`, user `authorizedkeys`/`otp_seed`, `ldap_bindpw`, WPA `passphrase`,
+  WEP `keys`, legacy OpenVPN `tls`/`auth_pass`, WireGuard/Zabbix PSKs, SNMP
+  `community`, RFC 2136 `keydata`, PPP `simpin`, ACME/Caddy credentials (`*_pass`,
+  `*pw`). Non-secret side effects: BGP `community` values and the
+  `system/ssh/keys` algorithm list are blanked too.
+- `opn_download_config` refuses (`unparseable_config`) instead of returning the
+  raw, unredacted XML when it cannot parse the config, and blanks a sensitive
+  element whole (children and attributes), as `opn_get_config_section` already
+  did (merged from main).
 - SavepointManager refuses overlapping savepoints inside the 60s confirmation
   window (undefined upstream semantics).
 - CrowdSec counts use the API `total` field (previously capped at page size).
