@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+
+- **Config redaction failed open:** `opn_download_config` returned the original,
+  unredacted config.xml whenever it could not parse it, while still reporting
+  `stripped: true`. It now refuses with `error_type: unparseable_config`.
+- **Secret tags leaked through redaction:** the 9-name exact list is replaced by the
+  pattern matcher from the v0.5 line (substrings, `*key` suffix except `pub*`), extended
+  for tags it still missed: cert/CA private keys (`prv`), user `authorizedkeys` and
+  `otp_seed`, `ldap_bindpw`, WPA `passphrase`, WEP `keys`, legacy OpenVPN `tls` and
+  `auth_pass`, WireGuard/Zabbix PSKs, the SNMP `community`, RFC 2136 `keydata` and several
+  ACME/Caddy credentials. Applies to `opn_download_config` and `opn_get_config_section`.
+  BGP `community` values are blanked as a side effect.
+
+### Fixed
+
+- `fastmcp` is bounded to `<4`: fastmcp 4 replaced `httpx` with `httpx2`, so fresh
+  installs failed to import.
+
 ## [0.4.1] - 2026-08-19
 
 ### Added
