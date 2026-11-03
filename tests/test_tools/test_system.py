@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
 
 from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.tools.system import (
@@ -66,11 +68,25 @@ class TestOpnListServices:
 class TestOpnGatewayStatus:
     """Tests for opn_gateway_status."""
 
-    async def test_calls_gateway_status(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value={"items": []})
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        rows = [{"name": "WAN_GW", "status": "up", "loss": 0, "delay": 5}]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_gateway_status(mock_ctx)
         mock_api.get.assert_called_once_with("gateway.status")
+        assert isinstance(result, dict)
+        assert result == payload
+
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"items": []})
+        result = await opn_gateway_status(mock_ctx)
         assert result == {"items": []}
+
+    async def test_empty_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"rows": [], "rowCount": 0})
+        result = await opn_gateway_status(mock_ctx)
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
 
 
 class TestOpnDownloadConfig:
@@ -352,10 +368,28 @@ class TestOpnMcpInfo:
         result = await opn_mcp_info(mock_ctx)
         assert result["opnsense_version"] == "25.1"
 
-    async def test_opnsense_version_not_detected(self, mock_api, mock_ctx):
+    async def test_detects_version_on_fresh_server(self, mock_api, mock_ctx):
+        """A fresh server has made no API call yet; mcp_info must not report null."""
         mock_api._detected_version = None
+        firmware = MagicMock(status_code=200)
+        firmware.json.return_value = {"product": {"product_version": "26.7.1"}}
+        mock_api._client.get = AsyncMock(return_value=firmware)
+
         result = await opn_mcp_info(mock_ctx)
+
+        assert result["opnsense_version"] == "26.7"
+        assert result["api_style"] == "snake_case"
+        assert "version_detection_error" not in result
+
+    async def test_reports_detection_failure_instead_of_raising(self, mock_api, mock_ctx):
+        mock_api._detected_version = None
+        mock_api._client.get = AsyncMock(side_effect=httpx.ConnectError("down"))
+
+        result = await opn_mcp_info(mock_ctx)
+
         assert result["opnsense_version"] is None
+        assert "Failed to connect" in result["version_detection_error"]
+        assert result["mcp_version"]
 
     async def test_api_style_camelcase(self, mock_api, mock_ctx):
         result = await opn_mcp_info(mock_ctx)

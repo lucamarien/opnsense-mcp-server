@@ -417,7 +417,7 @@ The server automatically detects the OPNsense version on first connection and se
 
 #### `opn_download_config` shows `[REDACTED]` values
 
-- This is the default behavior for security. Pass `include_sensitive=true` to include passwords and keys (use with caution in AI conversations)
+- This is the default behavior for security. To include passwords and keys, set `OPNSENSE_ALLOW_SENSITIVE=true` in the server environment and pass `include_sensitive=true` (use with caution in AI conversations)
 
 #### Write operations fail with "writes not enabled"
 

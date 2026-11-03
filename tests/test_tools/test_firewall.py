@@ -35,6 +35,26 @@ class TestOpnListFirewallRules:
         )
         assert result == {"rows": [], "rowCount": 0}
 
+    async def test_returns_non_empty_rules(self, mock_api, mock_ctx):
+        rows = [
+            {
+                "uuid": "rule-1",
+                "action": "pass",
+                "source": "192.168.1.0/24",
+                "destination": "any",
+                "protocol": "TCP/UDP",
+                "destination_port": "80",
+            },
+        ]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.post = AsyncMock(return_value=payload)
+
+        result = await opn_list_firewall_rules(mock_ctx)
+
+        assert isinstance(result, dict)
+        assert result == payload
+        assert result["rows"][0]["action"] == "pass"
+
     async def test_passes_search_phrase(self, mock_api, mock_ctx):
         mock_api.post = AsyncMock(return_value={"rows": []})
         await opn_list_firewall_rules(mock_ctx, search="ssh", limit=10)

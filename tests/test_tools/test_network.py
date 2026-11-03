@@ -54,19 +54,17 @@ class TestOpnArpTable:
 class TestOpnNdpTable:
     """Tests for opn_ndp_table."""
 
-    async def test_calls_interface_ndp(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(
-            return_value=[
-                {"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff", "intf": "em0"},
-            ]
-        )
+    async def test_bare_list_arrives_as_envelope(self, mock_api, mock_ctx):
+        rows = [{"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff", "intf": "em0"}]
+        payload = {"rows": rows, "rowCount": 1}
+        mock_api.get = AsyncMock(return_value=payload)
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
         assert result["total"] == 1
         assert result["entries"][0]["ip"] == "fe80::1"
 
-    async def test_returns_empty_ndp_table(self, mock_api, mock_ctx):
-        mock_api.get = AsyncMock(return_value=[])
+    async def test_wrapped_response(self, mock_api, mock_ctx):
+        mock_api.get = AsyncMock(return_value={"ndp": [{"ip": "fe80::1", "mac": "aa:bb:cc:dd:ee:ff"}]})
         result = await opn_ndp_table(mock_ctx)
         mock_api.get.assert_called_once_with("interface.ndp")
         assert result == {"entries": [], "total": 0}

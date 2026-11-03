@@ -19,7 +19,8 @@ async def opn_interface_stats(ctx: Context) -> dict[str, Any]:
 
     Use this when you need to see network utilization, check for interface
     errors, or compare traffic across interfaces.
-    Returns: dict keyed by interface name with statistics fields.
+    Returns: dict with 'statistics' (per-interface counters keyed by
+    interface label).
     """
     api = get_api(ctx)
     return await api.get("interface.statistics")

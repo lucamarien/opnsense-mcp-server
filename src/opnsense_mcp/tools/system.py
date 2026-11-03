@@ -87,6 +87,8 @@ async def opn_gateway_status(ctx: Context) -> dict[str, Any]:
     Use this when you need to check if WAN gateways are up, their latency,
     packet loss, or failover state.
     Returns: dict with gateway items including status, loss, and delay fields.
+    (If the API answers with a bare array, it arrives wrapped in the
+    'rows'/'rowCount' envelope.)
     """
     api = get_api(ctx)
     return await api.get("gateway.status")
@@ -242,16 +244,26 @@ async def opn_mcp_info(ctx: Context) -> dict[str, Any]:
 
     Use this to check the MCP server version, whether write mode and
     sensitive-data access are enabled, the detected OPNsense API version, and
-    whether firewall writes still get savepoint/rollback protection.
+    whether firewall writes still get savepoint/rollback protection. Version
+    detection runs here if no earlier call triggered it; if the firewall is
+    unreachable, the failure is reported instead of raised.
     Returns: dict with 'mcp_version', 'write_mode', 'sensitive_mode',
-    'opnsense_version', 'api_style' and 'savepoint_support'. 'savepoint_support'
-    is true when the 60-second auto-revert is available, false when OPNsense no
-    longer offers it (26.7+ removed it upstream, so firewall changes are immediate
-    and permanent), and null when no firewall write has probed for it yet.
+    'opnsense_version', 'api_style', 'savepoint_support' and, only when
+    detection failed, 'version_detection_error'. 'savepoint_support' is true
+    when the 60-second auto-revert is available, false when OPNsense no longer
+    offers it (26.7+ removed it upstream, so firewall changes are immediate and
+    permanent), and null when no firewall write has probed for it yet.
     """
     api = get_api(ctx)
+    # Detection is lazy (first real API call), so a fresh server would report null.
+    version_detection_error: str | None = None
+    try:
+        await api._ensure_version_detected()
+    except OPNsenseAPIError as exc:
+        version_detection_error = str(exc)
+
     version = api.detected_version
-    return {
+    result: dict[str, Any] = {
         "mcp_version": __version__,
         "write_mode": api.config.allow_writes,
         "sensitive_mode": api.config.allow_sensitive,
@@ -259,3 +271,6 @@ async def opn_mcp_info(ctx: Context) -> dict[str, Any]:
         "api_style": "snake_case" if api.use_snake_case else "camelCase",
         "savepoint_support": get_savepoint_manager(ctx).supported,
     }
+    if version_detection_error is not None:
+        result["version_detection_error"] = version_detection_error
+    return result

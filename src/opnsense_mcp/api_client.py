@@ -6,6 +6,8 @@ endpoint blocklist, and error response parsing.
 
 from __future__ import annotations
 
+import posixpath
+import re
 import time
 from typing import Any
 
@@ -18,6 +20,7 @@ BLOCKED_ENDPOINTS: frozenset[str] = frozenset(
     {
         "core/system/halt",
         "core/system/reboot",
+        "core/firmware/reboot",
         "core/firmware/poweroff",
         "core/firmware/update",
         "core/firmware/upgrade",
@@ -430,6 +433,11 @@ _VERSION_THRESHOLD = (25, 7)
 # OPNsense release that removed the firewall savepoint/rollback actions (core 17b8461).
 _SAVEPOINTS_REMOVED_IN = (26, 7)
 
+# A path_suffix is one path segment: an item UUID, a savepoint revision or a
+# comma-separated interface list. Separators, dot segments and percent-escapes
+# would let a caller-supplied value walk the request out of its endpoint.
+_PATH_SUFFIX_RE = re.compile(r"[A-Za-z0-9_.,-]+")
+
 
 class OPNsenseAPIError(Exception):
     """Raised when the OPNsense API returns an error."""
@@ -449,6 +457,25 @@ class WriteDisabledError(OPNsenseAPIError):
 
 class SavepointError(OPNsenseAPIError):
     """Raised when a savepoint operation fails."""
+
+
+def _normalize_response(payload: object) -> dict[str, Any]:
+    """Normalize a parsed OPNsense API payload to a dict.
+
+    Most endpoints return a JSON object, but some — notably
+    diagnostics/interface/getArp and getNdp — return a bare JSON array.
+    Tools declare a dict return type, and the MCP transport rejects
+    non-dict structured content with an error that embeds the full
+    payload. Normalizing at the client boundary
+    guarantees every JSON response is a dict: bare arrays are wrapped in
+    the same {rows, rowCount} envelope the search endpoints use, and any
+    other scalar payload is wrapped under "result".
+    """
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {"rows": payload, "rowCount": len(payload)}
+    return {"result": payload}
 
 
 def _is_missing_endpoint(exc: OPNsenseAPIError, detected_version: tuple[int, int] | None) -> bool:
@@ -536,8 +563,7 @@ class OPNsenseAPI:
         """
         await self._ensure_version_detected()
         path = self._resolve_endpoint(endpoint)
-        if path_suffix:
-            path = f"{path}/{path_suffix}"
+        path = self._append_suffix(path, path_suffix)
         self._check_blocklist(path)
         return await self._request("GET", path)
 
@@ -565,8 +591,7 @@ class OPNsenseAPI:
         """
         await self._ensure_version_detected()
         path = self._resolve_endpoint(endpoint)
-        if path_suffix:
-            path = f"{path}/{path_suffix}"
+        path = self._append_suffix(path, path_suffix)
         self._check_blocklist(path)
         return await self._request("POST", path, data=data)
 
@@ -618,12 +643,12 @@ class OPNsenseAPI:
             raise OPNsenseAPIError(error_msg, status_code=response.status_code)
 
         try:
-            result: dict[str, Any] = response.json()
+            result: Any = response.json()
         except (ValueError, TypeError) as exc:
             msg = f"Invalid JSON response from {path}"
             raise OPNsenseAPIError(msg) from exc
 
-        return result
+        return _normalize_response(result)
 
     async def _request_text(
         self,
@@ -710,13 +735,27 @@ class OPNsenseAPI:
         return entry[1] if self._use_snake_case else entry[0]
 
     @staticmethod
+    def _append_suffix(path: str, path_suffix: str) -> str:
+        """Append a single-segment path_suffix, refusing anything that could traverse.
+
+        Raises:
+            BlockedEndpointError: If the suffix is not one plain path segment.
+        """
+        if not path_suffix:
+            return path
+        if not _PATH_SUFFIX_RE.fullmatch(path_suffix) or path_suffix in (".", ".."):
+            msg = f"Invalid path suffix {path_suffix!r}: expected a single ID segment"
+            raise BlockedEndpointError(msg)
+        return f"{path}/{path_suffix}"
+
+    @staticmethod
     def _check_blocklist(path: str) -> None:
         """Raise if the resolved path matches a blocked endpoint.
 
-        Checks are normalized (stripped slashes, lowercased) and match
-        both exact paths and prefix patterns.
+        Checks are normalized (dot segments collapsed, stripped slashes,
+        lowercased) and match both exact paths and prefix patterns.
         """
-        normalized = path.strip("/").lower()
+        normalized = posixpath.normpath(f"/{path}").strip("/").lower()
         for blocked in BLOCKED_ENDPOINTS:
             if normalized == blocked or normalized.startswith(f"{blocked}/"):
                 msg = f"Endpoint is blocked for safety: {blocked}"

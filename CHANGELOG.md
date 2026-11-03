@@ -64,6 +64,13 @@ Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
 - `opn_configure_mdns_repeater` preserves existing blocklist/CARP settings.
 - New `OPNSENSE_API_STYLE=camel|snake` override lets API keys without the
   firmware/status privilege use the server (version detection is skipped).
+- **Path traversal past the endpoint blocklist** (merged from main): caller-supplied
+  UUIDs were appended to the request path unchecked, so a UUID such as
+  `../../../core/system/halt` passed the blocklist and reached `/api/core/system/halt`.
+  A path suffix must now be a single plain segment (`[A-Za-z0-9_.,-]`, not `.`/`..`),
+  and the blocklist collapses dot segments before matching. Reported by @PaulWaldo in #6.
+- `core/firmware/reboot` is blocklisted alongside `core/system/reboot`, and hostname
+  validation for the diagnostics tools rejects tab characters (merged from main, #6).
 
 ### Fixed
 
@@ -78,6 +85,14 @@ Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
   `applyAction()` reloads with `skip_alias`, so rules referencing a new or changed
   alias kept matching an empty or stale table. Every alias write now calls
   `firewall/alias/reconfigure` and reports `applied` (plus `apply_error`).
+- **Bare-array responses** (merged from main): the API client normalizes every JSON
+  response to a dict, wrapping bare arrays (`getArp`, `getNdp`) in the
+  `rows`/`rowCount` envelope, because MCP structured content must be a dict.
+  Contributed by @RyanMelena in #7.
+- `opn_mcp_info` detects the OPNsense version itself instead of reporting `null` when
+  it is the first call after a server start, and reports `version_detection_error`
+  when the firewall is unreachable (merged from main). Contributed by
+  @ShockinglyMoist in #3.
 
 ### Added
 
