@@ -24,8 +24,12 @@ def _strip_sensitive_data(xml_text: str) -> str | None:
     except ET.ParseError:
         return None
 
-    for elem in root.iter():
-        if is_sensitive_tag(elem.tag) and elem.text:
+    # Blank the whole element, as the parsed-section path does: a matching
+    # container must not keep children or attributes whose names look harmless.
+    for elem in [e for e in root.iter() if is_sensitive_tag(e.tag)]:
+        if elem.text or len(elem) or elem.attrib:
+            del elem[:]
+            elem.attrib.clear()
             elem.text = "[REDACTED]"
 
     return ET.tostring(root, encoding="unicode", xml_declaration=True)

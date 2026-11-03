@@ -68,6 +68,22 @@ class TestDownloadConfigRedaction:
         assert result["stripped"] is True
         assert [c for c in _CANARIES if c in result["config_xml"]] == []
 
+    async def test_sensitive_container_is_blanked_whole(self, mock_api, mock_ctx):
+        xml = (
+            "<opnsense><hostname>VISIBLE-host</hostname>"
+            "<credentials><user>CANARY-child</user></credentials>"
+            '<secret note="CANARY-attribute"><value>CANARY-nested</value></secret>'
+            "<password/></opnsense>"
+        )
+        mock_api.get_text = AsyncMock(return_value=xml)
+
+        result = await opn_download_config(mock_ctx)
+
+        assert "CANARY" not in result["config_xml"]
+        assert "<credentials>[REDACTED]</credentials>" in result["config_xml"]
+        assert "<password />" in result["config_xml"]
+        assert "VISIBLE-host" in result["config_xml"]
+
     async def test_non_secrets_survive(self, mock_api, mock_ctx):
         mock_api.get_text = AsyncMock(return_value=_FIXTURE)
 
