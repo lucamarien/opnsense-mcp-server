@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
 
 from opnsense_mcp.api_client import OPNsenseAPIError
 from opnsense_mcp.tools.system import (
@@ -367,10 +369,28 @@ class TestOpnMcpInfo:
         result = await opn_mcp_info(mock_ctx)
         assert result["opnsense_version"] == "25.1"
 
-    async def test_opnsense_version_not_detected(self, mock_api, mock_ctx):
+    async def test_detects_version_on_fresh_server(self, mock_api, mock_ctx):
+        """A fresh server has made no API call yet; mcp_info must not report null."""
         mock_api._detected_version = None
+        firmware = MagicMock(status_code=200)
+        firmware.json.return_value = {"product": {"product_version": "26.7.1"}}
+        mock_api._client.get = AsyncMock(return_value=firmware)
+
         result = await opn_mcp_info(mock_ctx)
+
+        assert result["opnsense_version"] == "26.7"
+        assert result["api_style"] == "snake_case"
+        assert "version_detection_error" not in result
+
+    async def test_reports_detection_failure_instead_of_raising(self, mock_api, mock_ctx):
+        mock_api._detected_version = None
+        mock_api._client.get = AsyncMock(side_effect=httpx.ConnectError("down"))
+
+        result = await opn_mcp_info(mock_ctx)
+
         assert result["opnsense_version"] is None
+        assert "Failed to connect" in result["version_detection_error"]
+        assert result["mcp_version"]
 
     async def test_api_style_camelcase(self, mock_api, mock_ctx):
         result = await opn_mcp_info(mock_ctx)
