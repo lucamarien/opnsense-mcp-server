@@ -16,7 +16,9 @@ async def opn_list_dhcp_leases(ctx: Context) -> dict[str, Any]:
     Use this when the OPNsense instance uses the ISC DHCP plugin (os-isc-dhcp).
     ISC DHCP is legacy and being phased out — most 26.x instances use dnsmasq or Kea.
     Use opn_scan_config first to check which DHCP backend is active.
-    Returns: dict with DHCP lease entries including address, mac, and hostname fields.
+    Returns: dict with DHCP lease entries including address, mac, and
+    hostname fields. (If the API answers with a bare array, it arrives
+    wrapped in the 'rows'/'rowCount' envelope.)
     """
     api = get_api(ctx)
     return await api.get("dhcpv4.leases.search")

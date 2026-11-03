@@ -320,6 +320,14 @@ class TestOpnPfStates:
         call_args = mock_api.post.call_args[0][1]
         assert call_args["searchPhrase"] == "192.168.1.10"
 
+    async def test_empty_state_table(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
+
+        result = await opn_pf_states(mock_ctx)
+
+        assert isinstance(result, dict)
+        assert result == {"rows": [], "rowCount": 0}
+
     async def test_limit_capped_at_1000(self, mock_api, mock_ctx):
         mock_api.post = AsyncMock(return_value={"rows": [], "rowCount": 0})
 

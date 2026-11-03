@@ -41,6 +41,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 - `fastmcp` is bounded to `<4`: fastmcp 4 replaced `httpx` with `httpx2`, so fresh
   installs failed to import.
+- **Bare-array responses broke read tools:** `opn_arp_table`, `opn_ndp_table` and other
+  tools on endpoints that answer with a bare JSON array (`diagnostics/interface/getArp`,
+  `getNdp`) failed with an HTTP 500 whose error body carried the whole table, because
+  MCP structured content must be a dict. The API client now normalizes every JSON
+  response at the boundary: bare arrays are wrapped in the `rows`/`rowCount` envelope,
+  dicts pass through unchanged. Contributed by @RyanMelena in #7.
 
 ## [0.4.1] - 2026-08-19
 

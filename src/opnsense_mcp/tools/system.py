@@ -82,6 +82,8 @@ async def opn_gateway_status(ctx: Context) -> dict[str, Any]:
     Use this when you need to check if WAN gateways are up, their latency,
     packet loss, or failover state.
     Returns: dict with gateway items including status, loss, and delay fields.
+    (If the API answers with a bare array, it arrives wrapped in the
+    'rows'/'rowCount' envelope.)
     """
     api = get_api(ctx)
     return await api.get("gateway.status")
