@@ -47,6 +47,11 @@ This project follows [Semantic Versioning](https://semver.org/).
   MCP structured content must be a dict. The API client now normalizes every JSON
   response at the boundary: bare arrays are wrapped in the `rows`/`rowCount` envelope,
   dicts pass through unchanged. Contributed by @RyanMelena in #7.
+- `opn_mcp_info` reported `opnsense_version: null` and the default endpoint style when
+  it was the first call after a server start, because version detection only ran
+  lazily on the first API request. It now detects the version itself and reports
+  `version_detection_error` instead of failing when the firewall is unreachable.
+  Contributed by @ShockinglyMoist in #3.
 
 ## [0.4.1] - 2026-08-19
 
