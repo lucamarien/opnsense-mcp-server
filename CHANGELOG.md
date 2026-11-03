@@ -11,13 +11,17 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **Config redaction failed open:** `opn_download_config` returned the original,
   unredacted config.xml whenever it could not parse it, while still reporting
   `stripped: true`. It now refuses with `error_type: unparseable_config`.
-- **Secret tags leaked through redaction:** the 9-name exact list is replaced by the
-  pattern matcher from the v0.5 line (substrings, `*key` suffix except `pub*`), extended
-  for tags it still missed: cert/CA private keys (`prv`), user `authorizedkeys` and
-  `otp_seed`, `ldap_bindpw`, WPA `passphrase`, WEP `keys`, legacy OpenVPN `tls` and
-  `auth_pass`, WireGuard/Zabbix PSKs, the SNMP `community`, RFC 2136 `keydata` and several
-  ACME/Caddy credentials. Applies to `opn_download_config` and `opn_get_config_section`.
-  BGP `community` values are blanked as a side effect.
+- **Secret tags leaked through redaction:** the 9-name exact list now sits behind the
+  pattern matcher from the v0.5 line (secret substrings, `*key` suffix except `pub*`,
+  allowlist for `passwordauth`/`nopasswd`), extended for tags it still missed: cert/CA
+  private keys (`prv`), user `authorizedkeys` and `otp_seed`, `ldap_bindpw`, WPA
+  `passphrase`, WEP `keys`, legacy OpenVPN `tls` and `auth_pass`, WireGuard/Zabbix PSKs,
+  the SNMP `community`, RFC 2136 `keydata`, the PPP `simpin` and several ACME/Caddy
+  credentials. Applies to `opn_download_config` and `opn_get_config_section`. Non-secret
+  side effects: BGP `community` values and the `system/ssh/keys` algorithm list are
+  blanked too.
+- `opn_download_config` blanks a sensitive element whole (children and attributes), as
+  `opn_get_config_section` already did, instead of replacing only its text.
 
 ### Fixed
 
