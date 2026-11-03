@@ -6,8 +6,8 @@ Security fixes are released for the latest minor version on PyPI.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.4.x   | yes       |
-| < 0.4   | no        |
+| 0.5.x   | yes       |
+| < 0.5   | no        |
 
 ## Reporting a Vulnerability
 
