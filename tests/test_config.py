@@ -160,6 +160,31 @@ class TestAllowWrites:
             self._load_with_writes("sometimes")
 
 
+class TestAllowSensitive:
+    """Tests for OPNSENSE_ALLOW_SENSITIVE parsing."""
+
+    def _load_with_sensitive(self, value: str | None):
+        env = {
+            "OPNSENSE_URL": "https://10.0.0.1/api",
+            "OPNSENSE_API_KEY": "key",
+            "OPNSENSE_API_SECRET": "secret",
+        }
+        if value is not None:
+            env["OPNSENSE_ALLOW_SENSITIVE"] = value
+        with patch.dict("os.environ", env, clear=True):
+            return load_config()
+
+    def test_default_false(self):
+        assert self._load_with_sensitive(None).allow_sensitive is False
+
+    def test_true(self):
+        assert self._load_with_sensitive("true").allow_sensitive is True
+
+    def test_invalid_raises_error(self):
+        with pytest.raises(ConfigError, match="OPNSENSE_ALLOW_SENSITIVE"):
+            self._load_with_sensitive("sometimes")
+
+
 class TestConfigFrozen:
     """Tests that the config object is immutable."""
 

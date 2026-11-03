@@ -178,7 +178,7 @@ class TestOpnPing:
         assert "invalid" in result["error"].lower()
 
     async def test_ping_rejects_shell_metacharacters(self, mock_api, mock_ctx):
-        for bad_char in ("(", ")", "{", "}", "<", ">", "'", '"', "\\", " "):
+        for bad_char in ("(", ")", "{", "}", "<", ">", "'", '"', "\\", " ", "\t"):
             result = await opn_ping(mock_ctx, host=f"host{bad_char}bad")
             assert "error" in result, f"Should reject hostname with '{bad_char}'"
 

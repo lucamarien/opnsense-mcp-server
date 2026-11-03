@@ -11,7 +11,9 @@ from opnsense_mcp.server import get_api, mcp
 
 _MAX_PING_POLLS = 30
 _PING_POLL_INTERVAL = 1.0
-_HOSTNAME_REJECT = frozenset({";", "&", "|", "$", "`", "\n", "\r", "(", ")", "{", "}", "<", ">", "'", '"', "\\", " "})
+_HOSTNAME_REJECT = frozenset(
+    {";", "&", "|", "$", "`", "\n", "\r", "\t", "(", ")", "{", "}", "<", ">", "'", '"', "\\", " "}
+)
 
 
 def _validate_hostname(value: str) -> str | None:

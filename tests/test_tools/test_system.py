@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from unittest.mock import AsyncMock
 
 from opnsense_mcp.api_client import OPNsenseAPIError
@@ -14,6 +15,11 @@ from opnsense_mcp.tools.system import (
     opn_scan_config,
     opn_system_status,
 )
+
+
+def _allow_sensitive(api):
+    """Simulate OPNSENSE_ALLOW_SENSITIVE=true on the mocked API client."""
+    api._config = dataclasses.replace(api._config, allow_sensitive=True)
 
 
 class TestOpnSystemStatus:
@@ -118,6 +124,7 @@ class TestOpnDownloadConfig:
         assert result["size_bytes"] > 0
 
     async def test_downloads_config_without_stripping(self, mock_api, mock_ctx):
+        _allow_sensitive(mock_api)
         mock_api.get_text = AsyncMock(return_value=self._SAMPLE_XML)
 
         result = await opn_download_config(mock_ctx, include_sensitive=True)
@@ -127,14 +134,34 @@ class TestOpnDownloadConfig:
         assert "test-api-key" in result["config_xml"]
         assert "[REDACTED]" not in result["config_xml"]
 
-    async def test_handles_malformed_xml(self, mock_api, mock_ctx):
-        malformed = "<opnsense><unclosed>"
+    async def test_refuses_malformed_xml(self, mock_api, mock_ctx):
+        malformed = "<opnsense><system><password>hunter2</password><unclosed>"
         mock_api.get_text = AsyncMock(return_value=malformed)
 
         result = await opn_download_config(mock_ctx)
 
+        assert result["error_type"] == "unparseable_config"
+        assert "config_xml" not in result
+        assert "hunter2" not in str(result)
+
+    async def test_include_sensitive_refused_without_env_opt_in(self, mock_api, mock_ctx):
+        mock_api.get_text = AsyncMock(return_value=self._SAMPLE_XML)
+
+        result = await opn_download_config(mock_ctx, include_sensitive=True)
+
+        assert result["error_type"] == "sensitive_disabled"
+        assert "config_xml" not in result
+        mock_api.get_text.assert_not_called()
+
+    async def test_include_sensitive_passes_malformed_xml_through(self, mock_api, mock_ctx):
+        _allow_sensitive(mock_api)
+        malformed = "<opnsense><unclosed>"
+        mock_api.get_text = AsyncMock(return_value=malformed)
+
+        result = await opn_download_config(mock_ctx, include_sensitive=True)
+
         assert result["config_xml"] == malformed
-        assert result["stripped"] is True
+        assert result["stripped"] is False
 
     async def test_returns_metadata(self, mock_api, mock_ctx):
         mock_api.get_text = AsyncMock(return_value="<opnsense />")
@@ -277,9 +304,16 @@ class TestOpnGetConfigSection:
         assert result["data"]["password"] == "[REDACTED]"
 
     async def test_include_sensitive(self, mock_api, mock_ctx):
+        _allow_sensitive(mock_api)
         self._setup_mock_api(mock_api)
         result = await opn_get_config_section(mock_ctx, section="system", include_sensitive=True)
         assert result["data"]["password"] == "secret123"
+
+    async def test_include_sensitive_refused_without_env_opt_in(self, mock_api, mock_ctx):
+        self._setup_mock_api(mock_api)
+        result = await opn_get_config_section(mock_ctx, section="system", include_sensitive=True)
+        assert result["error_type"] == "sensitive_disabled"
+        assert "secret123" not in str(result)
 
     async def test_section_not_found(self, mock_api, mock_ctx):
         self._setup_mock_api(mock_api)
