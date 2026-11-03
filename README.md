@@ -2,7 +2,7 @@
 
 A secure [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for managing OPNsense firewalls through AI assistants like [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Cursor, and other MCP-compatible tools.
 
-**64 tools** across 10 domains (system, network, firewall, DNS, DHCP, VPN, HAProxy, services, diagnostics, security), plus **3 guided-workflow prompts** and **MCP resources** for configuration context. Every tool carries MCP tool annotations (`readOnlyHint`/`destructiveHint`) so clients can auto-approve reads.
+**66 tools** across 10 domains (system, network, firewall, DNS, DHCP, VPN, HAProxy, services, diagnostics, security), plus **3 guided-workflow prompts** and **MCP resources** for configuration context. Every tool carries MCP tool annotations (`readOnlyHint`/`destructiveHint`) so clients can auto-approve reads.
 
 ## Requirements
 
@@ -17,7 +17,7 @@ This MCP server is designed with security as the primary concern:
 - **Savepoint/rollback (OPNsense < 26.7 only)** — where OPNsense still offers the savepoint API, firewall *filter* modifications use its built-in 60-second auto-revert; changes must be explicitly confirmed or they roll back automatically. OPNsense 26.7 removed that API upstream — the server detects the missing endpoint at runtime and applies firewall changes immediately, with no automatic rollback. NAT (port forward) changes always apply immediately — OPNsense's savepoint mechanism never covered the NAT model (verified upstream), and the tools say so honestly
 - **Sensitive data double-gate** — `include_sensitive=true` on config tools additionally requires `OPNSENSE_ALLOW_SENSITIVE=true` in the server environment; the model cannot self-elevate to read passwords/keys
 - **HTTPS enforced** — `http://` URLs are refused unless `OPNSENSE_ALLOW_INSECURE_HTTP=true` (API credentials travel as Basic Auth)
-- **Tool annotations** — all 64 tools declare `readOnlyHint`/`destructiveHint`/`idempotentHint`, so MCP clients can auto-approve reads and warn on destructive calls
+- **Tool annotations** — all 66 tools declare `readOnlyHint`/`destructiveHint`/`idempotentHint`, so MCP clients can auto-approve reads and warn on destructive calls
 - **Endpoint blocklist** — dangerous endpoints (`halt`, `reboot`, `poweroff`, `firmware update/upgrade`) are hard-blocked at the API client level and can never be called
 - **API-only** — no SSH access, no command execution, no direct config file manipulation
 - **Local transport** — STDIO only, no network-exposed HTTP/SSE endpoints
@@ -144,7 +144,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 
 **Custom ports:** If your OPNsense web GUI runs on a non-standard port (e.g., 10443), include it in the URL: `https://192.168.1.1:10443/api`
 
-## Available Tools (64)
+## Available Tools (66)
 
 Surface pattern: `opn_list_*` / `opn_get_*` / `*_status` for reads, `opn_manage_*(action=...)`
 for writes (HAProxy uses a generic `resource_type` CRUD because its 9 resource types share one
@@ -208,13 +208,15 @@ uniform API). All errors come back as `{"error", "error_type", ...}` dicts.
 | `opn_edit_dnsbl_allowlist` | Add and/or remove allowlist domains without replacing the list. Params: `uuid`, `add_domains`, `remove_domains` | Yes |
 | `opn_apply_dnsbl` | Reload blocklist files and restart Unbound (no config change) | Yes |
 
-### DHCP (4 tools)
+### DHCP (6 tools)
 
 | Tool | Description | Writes |
 | --- | --- | --- |
 | `opn_list_dhcp_leases` | Leases from the active (or a specific) backend. Params: `backend` (auto/dnsmasq/kea/isc), `search`, `limit` | No |
 | `opn_list_dnsmasq_ranges` | DHCP address ranges incl. IPv6/RA config. Params: `search`, `limit` | No |
 | `opn_manage_dnsmasq_range` | Add/update/delete a DHCP range (applies immediately). Params: `action`, `uuid`, `interface`, `start_addr`, `end_addr`, `prefix_len`, `ra_mode`, `lease_time`, `description`, `enabled` | Yes |
+| `opn_list_dnsmasq_hosts` | Static host reservations (fixed IP per MAC). Params: `search`, `limit` | No |
+| `opn_manage_dnsmasq_host` | Add/update/delete a static host reservation (applies immediately). Params: `action`, `uuid`, `ip`, `mac`, `hostname`, `domain`, `description` | Yes |
 | `opn_reconfigure_dnsmasq` | Apply pending dnsmasq configuration changes | Yes |
 
 ### VPN (3 tools)

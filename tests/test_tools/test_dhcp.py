@@ -1,4 +1,4 @@
-"""Tests for DHCP tools (backend-aware leases + manage range, v0.5)."""
+"""Tests for DHCP tools (backend-aware leases + manage range/host, v0.5)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 
 from opnsense_mcp.tools.dhcp import (
     opn_list_dhcp_leases,
+    opn_list_dnsmasq_hosts,
     opn_list_dnsmasq_ranges,
+    opn_manage_dnsmasq_host,
     opn_manage_dnsmasq_range,
     opn_reconfigure_dnsmasq,
 )
@@ -153,6 +155,74 @@ class TestManageDnsmasqRange:
     async def test_writes_disabled(self, mock_ctx_no_writes):
         result = await opn_manage_dnsmasq_range(
             mock_ctx_no_writes, action="add", interface="lan", start_addr="a", end_addr="b"
+        )
+        assert result["error_type"] == "writes_disabled"
+
+
+class TestListDnsmasqHosts:
+    async def test_calls_search_host(self, mock_api, mock_ctx):
+        mock_api.post = AsyncMock(return_value={"rows": []})
+        await opn_list_dnsmasq_hosts(mock_ctx, search="nas", limit=20)
+        mock_api.post.assert_called_once_with(
+            "dnsmasq.settings.search_host",
+            {"current": 1, "rowCount": 20, "searchPhrase": "nas"},
+        )
+
+
+class TestManageDnsmasqHost:
+    async def test_add_requires_ip_and_mac(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock()
+        result = await opn_manage_dnsmasq_host(mock_ctx_writes, action="add", ip="192.168.1.50")
+        assert result["error_type"] == "validation"
+        assert "mac" in result["error"]
+        mock_api_writes.post.assert_not_called()
+
+    async def test_add_maps_fields_and_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[
+                {"result": "saved", "uuid": "host-1"},
+                {"status": "ok"},
+            ]
+        )
+        result = await opn_manage_dnsmasq_host(
+            mock_ctx_writes,
+            action="add",
+            ip="192.168.1.50",
+            mac="aa:bb:cc:dd:ee:ff",
+            hostname="nas",
+            description="NAS",
+        )
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["dnsmasq.settings.add_host", "dnsmasq.service.reconfigure"]
+        config = mock_api_writes.post.call_args_list[0][0][1]["host"]
+        # The hosts model has no 'enabled' field; only model field names are sent.
+        assert config == {"ip": "192.168.1.50", "hwaddr": "aa:bb:cc:dd:ee:ff", "host": "nas", "descr": "NAS"}
+        assert result["uuid"] == "host-1"
+        assert result["reconfigure_status"] == "ok"
+
+    async def test_update_requires_uuid(self, mock_ctx_writes):
+        result = await opn_manage_dnsmasq_host(mock_ctx_writes, action="update", ip="192.168.1.51")
+        assert result["error_type"] == "validation"
+
+    async def test_update_sends_only_provided(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "saved"}, {"status": "ok"}])
+        await opn_manage_dnsmasq_host(mock_ctx_writes, action="update", uuid="host-1", ip="192.168.1.51")
+        call = mock_api_writes.post.call_args_list[0]
+        assert call[0][0] == "dnsmasq.settings.set_host"
+        assert call[0][1] == {"host": {"ip": "192.168.1.51"}}
+        assert call[1]["path_suffix"] == "host-1"
+
+    async def test_delete_reconfigures(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(side_effect=[{"result": "deleted"}, {"status": "ok"}])
+        result = await opn_manage_dnsmasq_host(mock_ctx_writes, action="delete", uuid="host-1")
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["dnsmasq.settings.del_host", "dnsmasq.service.reconfigure"]
+        assert mock_api_writes.post.call_args_list[0][1]["path_suffix"] == "host-1"
+        assert result["uuid"] == "host-1"
+
+    async def test_writes_disabled(self, mock_ctx_no_writes):
+        result = await opn_manage_dnsmasq_host(
+            mock_ctx_no_writes, action="add", ip="192.168.1.50", mac="aa:bb:cc:dd:ee:ff"
         )
         assert result["error_type"] == "writes_disabled"
 

@@ -57,6 +57,8 @@ class TestToolRegistration:
             "opn_list_dhcp_leases",
             "opn_list_dnsmasq_ranges",
             "opn_manage_dnsmasq_range",
+            "opn_list_dnsmasq_hosts",
+            "opn_manage_dnsmasq_host",
             "opn_reconfigure_dnsmasq",
             # VPN
             "opn_wireguard_status",
@@ -94,11 +96,11 @@ class TestToolRegistration:
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) == 64, f"Expected 64 tools, got {len(tools)}"
+        assert len(tools) == 66, f"Expected 66 tools, got {len(tools)}"
 
     async def test_tool_count_under_ceiling(self):
-        """The project's self-imposed tool budget: stay under 65 tools."""
+        """The project's self-imposed tool budget: stay under 67 tools."""
         from opnsense_mcp.server import mcp
 
         tools = await mcp.list_tools()
-        assert len(tools) < 65, f"Tool budget exceeded: {len(tools)} >= 65. Consolidate before adding."
+        assert len(tools) < 67, f"Tool budget exceeded: {len(tools)} >= 67. Consolidate before adding."

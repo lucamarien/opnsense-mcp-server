@@ -51,7 +51,7 @@ async def opn_example_tool(ctx: Context, search: str = "", limit: int = 50) -> d
 
 ### Tool Naming & Surface Pattern
 
-- All tools use the `opn_` prefix; **tool budget: the total count must stay below 65**
+- All tools use the `opn_` prefix; **tool budget: the total count must stay below 67**
   (enforced by `test_registration.py`) — consolidate before adding
 - Read tools: `opn_list_*`, `opn_get_*`, `opn_*_status`
 - Write tools: one `opn_manage_<entity>(action=Literal["add","update","delete",...])`

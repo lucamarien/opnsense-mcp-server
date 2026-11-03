@@ -6,8 +6,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.5.0] - 2026-06-10
 
-Framework-compliance release: consolidated tool surface (81 → 64 tools, restoring
-the <65 budget), MCP protocol features (annotations, prompts, resources), a
+Framework-compliance release: consolidated tool surface (81 → 66 tools, under a
+<67 budget), MCP protocol features (annotations, prompts, resources), a
 corrected NAT safety story, and hardened defaults. Breaking — see the migration
 table below.
 
@@ -97,12 +97,14 @@ Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
 ### Added
 
 - **MCP protocol features:** ToolAnnotations (readOnly/destructive/idempotent/
-  openWorld) on all 64 tools; prompts `ipv6_migration`, `expose_service`,
+  openWorld) on all 66 tools; prompts `ipv6_migration`, `expose_service`,
   `remediate_audit`; resources `opnsense://inventory` and
   `opnsense://config/{section}`.
 - **New tools:** `opn_find_host` (one lookup across ARP/NDP/DHCP leases/DNS
   overrides), `opn_system_health` (memory/disk/load/uptime/temperature),
-  `opn_traffic_top` (per-host bandwidth snapshot).
+  `opn_traffic_top` (per-host bandwidth snapshot), `opn_list_dnsmasq_hosts` +
+  `opn_manage_dnsmasq_host` (dnsmasq static host reservations, from #8 by
+  @naeem-ahmed; the budget was raised from <65 to <67 for them).
 - `opn_arp_table`/`opn_ndp_table` gained `search`/`limit` (previously unbounded).
 - Closed-set parameters are now `Literal` enums (validated client-side).
 - Uniform error envelope `{"error", "error_type", "status_code", "hint"}` on all
@@ -110,7 +112,7 @@ Note: the rule verdict parameter on `opn_manage_firewall_rule` is `rule_action`
 - Untrusted-data notes on tools surfacing device-supplied strings (lease
   hostnames, ARP/NDP, CrowdSec alerts, firewall log, DNS lookups).
 - Convention meta-tests (annotations/docstrings/revert-story) and a 90% coverage
-  gate in CI; tool budget (<65) enforced by test.
+  gate in CI; tool budget (<67) enforced by test.
 - Docker image runs as non-root; OCI labels; fastmcp bounded `>=2.0,<4`
   (suite verified against fastmcp 3.4.2).
 

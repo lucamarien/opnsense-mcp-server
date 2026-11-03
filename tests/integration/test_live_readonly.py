@@ -32,6 +32,7 @@ from opnsense_mcp.config import load_config
 from opnsense_mcp.config_cache import ConfigCache
 from opnsense_mcp.tools.dhcp import (
     opn_list_dhcp_leases,
+    opn_list_dnsmasq_hosts,
     opn_list_dnsmasq_ranges,
 )
 from opnsense_mcp.tools.diagnostics import (
@@ -228,6 +229,7 @@ async def main() -> int:
         ("opn_list_cron_jobs", opn_list_cron_jobs(ctx)),
         ("opn_list_dhcp_leases[dnsmasq]", opn_list_dhcp_leases(ctx, backend="dnsmasq")),
         ("opn_list_dnsmasq_ranges", opn_list_dnsmasq_ranges(ctx)),
+        ("opn_list_dnsmasq_hosts", opn_list_dnsmasq_hosts(ctx)),
         ("opn_pf_states", opn_pf_states(ctx, limit=20)),
         ("opn_list_nat_rules", opn_list_nat_rules(ctx)),
         ("opn_list_static_routes", opn_list_static_routes(ctx)),

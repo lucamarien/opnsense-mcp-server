@@ -1,4 +1,4 @@
-"""DHCP tools — lease listing across backends, dnsmasq range management."""
+"""DHCP tools — lease listing across backends, dnsmasq range and static host management."""
 
 from __future__ import annotations
 
@@ -213,14 +213,130 @@ async def opn_manage_dnsmasq_range(
     }
 
 
+@mcp.tool(annotations=READ_ONLY)
+@catch_api_errors
+async def opn_list_dnsmasq_hosts(
+    ctx: Context,
+    search: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List dnsmasq static host reservations (a fixed IP per client MAC).
+
+    Use this to see which clients have a reserved address, to check for an
+    existing reservation before adding one, or to find a UUID for
+    opn_manage_dnsmasq_host.
+
+    Key fields: host (hostname), domain, ip, hwaddr (MAC), descr, aliases.
+
+    Note: Requires the dnsmasq DNS/DHCP server (os-dnsmasq-dns or built-in).
+    Returns: dict with 'rows' (list of reservations) and 'rowCount' (total).
+    """
+    api = get_api(ctx)
+    return await api.post(
+        "dnsmasq.settings.search_host",
+        {"current": 1, "rowCount": clamp_limit(limit), "searchPhrase": search},
+    )
+
+
+@mcp.tool(annotations=DESTRUCTIVE)
+@catch_api_errors
+async def opn_manage_dnsmasq_host(
+    ctx: Context,
+    action: Literal["add", "update", "delete"],
+    uuid: str = "",
+    ip: str | None = None,
+    mac: str | None = None,
+    hostname: str | None = None,
+    domain: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Add, update, or delete a dnsmasq static host reservation (applies immediately).
+
+    The dnsmasq service is reconfigured automatically after every change —
+    changes take effect immediately and are NOT auto-revertible. A client
+    picks up a new or changed reservation when it renews its lease; after a
+    delete it gets a dynamic address from the pool instead.
+
+    Actions:
+    - 'add': create a reservation. Requires ip and mac.
+    - 'update': modify the reservation identified by uuid. Only provided
+      parameters change.
+    - 'delete': remove the reservation identified by uuid.
+
+    Parameters:
+    - ip: address to reserve (e.g. '192.168.1.50')
+    - mac: client MAC address (e.g. 'aa:bb:cc:dd:ee:ff')
+    - hostname: hostname without the domain (e.g. 'nas')
+    - domain: domain for the hostname; empty uses the system domain
+    - description: human-readable description
+
+    Use opn_list_dnsmasq_hosts first to find UUIDs and avoid duplicates.
+    Returns: dict with 'result', 'uuid', and 'reconfigure_status'.
+    """
+    if action in ("update", "delete") and not uuid:
+        return {"error": f"uuid is required for action '{action}'", "error_type": "validation"}
+
+    api = get_api(ctx)
+    api.require_writes()
+
+    if action == "delete":
+        result = await api.post("dnsmasq.settings.del_host", path_suffix=uuid)
+        reconfigure = await api.post("dnsmasq.service.reconfigure")
+        get_config_cache(ctx).invalidate()
+        return {
+            "result": result.get("result", ""),
+            "uuid": uuid,
+            "reconfigure_status": reconfigure.get("status", "unknown"),
+        }
+
+    host_config: dict[str, str] = {}
+    if ip is not None:
+        host_config["ip"] = ip
+    if mac is not None:
+        host_config["hwaddr"] = mac
+    if hostname is not None:
+        host_config["host"] = hostname
+    if domain is not None:
+        host_config["domain"] = domain
+    if description is not None:
+        host_config["descr"] = description
+
+    if action == "add":
+        missing = [n for n, v in (("ip", ip), ("mac", mac)) if not v]
+        if missing:
+            return {
+                "error": f"Required for action 'add': {', '.join(missing)}",
+                "error_type": "validation",
+            }
+        result = await api.post("dnsmasq.settings.add_host", {"host": host_config})
+        reconfigure = await api.post("dnsmasq.service.reconfigure")
+        get_config_cache(ctx).invalidate()
+        return {
+            "result": result.get("result", "unknown"),
+            "uuid": result.get("uuid", ""),
+            "reconfigure_status": reconfigure.get("status", "unknown"),
+        }
+
+    # update
+    result = await api.post("dnsmasq.settings.set_host", {"host": host_config}, path_suffix=uuid)
+    reconfigure = await api.post("dnsmasq.service.reconfigure")
+    get_config_cache(ctx).invalidate()
+    return {
+        "result": result.get("result", ""),
+        "uuid": uuid,
+        "reconfigure_status": reconfigure.get("status", "unknown"),
+    }
+
+
 @mcp.tool(annotations=WRITE)
 @catch_api_errors
 async def opn_reconfigure_dnsmasq(ctx: Context) -> dict[str, Any]:
     """Apply pending dnsmasq DNS/DHCP configuration changes.
 
     Use this after manually editing dnsmasq settings to apply the changes
-    to the running dnsmasq service. opn_manage_dnsmasq_range reconfigures
-    automatically — this is only needed for manual edits or troubleshooting.
+    to the running dnsmasq service. opn_manage_dnsmasq_range and
+    opn_manage_dnsmasq_host reconfigure automatically — this is only needed
+    for manual edits or troubleshooting.
 
     NOTE: No savepoint protection; a restart briefly interrupts DHCP/DNS
     service on the affected interfaces.
