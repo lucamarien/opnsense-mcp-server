@@ -11,6 +11,14 @@ from opnsense_mcp import __version__
 from opnsense_mcp.config_cache import is_sensitive_tag
 from opnsense_mcp.server import get_api, get_config_cache, get_savepoint_manager, mcp
 
+_SENSITIVE_GATE_ERROR = {
+    "error": (
+        "include_sensitive=true requires OPNSENSE_ALLOW_SENSITIVE=true in the "
+        "server environment. Without it, passwords/keys are always redacted."
+    ),
+    "error_type": "sensitive_disabled",
+}
+
 
 def _strip_sensitive_data(xml_text: str) -> str | None:
     """Replace sensitive element text with [REDACTED] in config XML.
@@ -92,10 +100,15 @@ async def opn_download_config(
 
     By default, sensitive data (passwords, keys, secrets) is redacted; a config
     that cannot be parsed for redaction is refused, never returned raw.
+    include_sensitive=true additionally requires OPNSENSE_ALLOW_SENSITIVE=true
+    in the server environment — without it, the call is refused.
     Returns: dict with 'config_xml' (str), 'stripped' (bool), 'size_bytes' (int),
     or 'error'/'error_type' when the config cannot be parsed.
     """
     api = get_api(ctx)
+    if include_sensitive and not api._config.allow_sensitive:
+        return dict(_SENSITIVE_GATE_ERROR)
+
     xml_text = await api.get_text("core.backup.download")
 
     if not include_sensitive:
@@ -153,9 +166,14 @@ async def opn_get_config_section(
     The 'filter' section is particularly useful — it contains legacy GUI
     firewall rules that are NOT visible via opn_list_firewall_rules.
 
+    Sensitive values are redacted by default; include_sensitive=true requires
+    OPNSENSE_ALLOW_SENSITIVE=true in the server environment.
     Returns: dict with 'section' name and 'data' (structured config data).
     """
     api = get_api(ctx)
+    if include_sensitive and not api._config.allow_sensitive:
+        return dict(_SENSITIVE_GATE_ERROR)
+
     cache = get_config_cache(ctx)
 
     if not cache.is_loaded or cache.is_stale:

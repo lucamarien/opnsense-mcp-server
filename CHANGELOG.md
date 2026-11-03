@@ -8,6 +8,20 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **Path traversal past the endpoint blocklist:** caller-supplied UUIDs were appended
+  to the request path unchecked, so a UUID such as `../../../core/system/halt` passed
+  the blocklist and reached `/api/core/system/halt`. With writes enabled, one
+  prompt-injected tool call could halt, reboot or upgrade the firewall. A path suffix
+  must now be a single plain segment (`[A-Za-z0-9_.,-]`, not `.`/`..`), and the
+  blocklist collapses dot segments before matching. Reported by @PaulWaldo in #6.
+- **`include_sensitive` needs operator opt-in:** `opn_download_config` and
+  `opn_get_config_section` refuse `include_sensitive=true` (`error_type:
+  sensitive_disabled`) unless `OPNSENSE_ALLOW_SENSITIVE=true` is set, so the model can
+  no longer request unredacted secrets on its own. **Behaviour change** for setups that
+  relied on the parameter alone. Reported by @PaulWaldo in #6.
+- Hostname validation for the diagnostics tools also rejects tab characters (#6).
+- `core/firmware/reboot` is blocklisted too: it reboots the firewall like
+  `core/system/reboot`, which was the only reboot endpoint on the list.
 - **Config redaction failed open:** `opn_download_config` returned the original,
   unredacted config.xml whenever it could not parse it, while still reporting
   `stripped: true`. It now refuses with `error_type: unparseable_config`.

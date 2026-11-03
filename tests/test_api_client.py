@@ -74,6 +74,7 @@ class TestBlocklist:
         expected = {
             "core/system/halt",
             "core/system/reboot",
+            "core/firmware/reboot",
             "core/firmware/poweroff",
             "core/firmware/update",
             "core/firmware/upgrade",
@@ -446,6 +447,47 @@ class TestPathSuffix:
                 await api.post("_test_suffix", path_suffix="extra")
         finally:
             del ENDPOINT_REGISTRY["_test_suffix"]
+
+    @pytest.mark.parametrize(
+        "suffix",
+        [
+            "../../../core/system/halt",
+            "x/../../../core/firmware/poweroff",
+            "..%2F..%2F..%2Fcore%2Fsystem%2Fhalt",
+            "..",
+            ".",
+            "a/b",
+            "abc?x=1",
+            "abc#frag",
+            "abc def",
+            "abc\\def",
+        ],
+    )
+    async def test_post_rejects_traversal_suffix(self, mock_config_writes, mock_httpx_client, suffix):
+        api = _make_api_with_version(mock_config_writes, mock_httpx_client, (25, 1))
+        with pytest.raises(BlockedEndpointError, match="Invalid path suffix"):
+            await api.post("firewall.alias.del", path_suffix=suffix)
+        mock_httpx_client.post.assert_not_called()
+
+    async def test_get_rejects_traversal_suffix(self, mock_config, mock_httpx_client):
+        api = _make_api_with_version(mock_config, mock_httpx_client, (25, 1))
+        with pytest.raises(BlockedEndpointError, match="Invalid path suffix"):
+            await api.get("firewall.alias.get", path_suffix="../../../core/system/halt")
+        mock_httpx_client.get.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "1700000000.1234", "lan,wan,opt1", "abc_123"],
+    )
+    async def test_plain_segment_suffix_allowed(self, mock_config_writes, mock_httpx_client, suffix):
+        mock_httpx_client.post.return_value = _make_response(json_data={"result": "ok"})
+        api = _make_api_with_version(mock_config_writes, mock_httpx_client, (25, 1))
+        await api.post("firewall.apply", path_suffix=suffix)
+        mock_httpx_client.post.assert_called_once_with(f"/firewall/filter/apply/{suffix}", json=None)
+
+    def test_blocklist_collapses_dot_segments(self):
+        with pytest.raises(BlockedEndpointError):
+            OPNsenseAPI._check_blocklist("firewall/alias/delItem/../../../core/system/halt")
 
 
 # --- Savepoint Manager Tests ---

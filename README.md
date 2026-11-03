@@ -135,6 +135,7 @@ Add to your Cursor MCP settings (Settings > MCP):
 | `OPNSENSE_API_SECRET` | *(required)* | API secret from OPNsense user settings |
 | `OPNSENSE_VERIFY_SSL` | `true` | Verify SSL certificate (`false` for self-signed certs) |
 | `OPNSENSE_ALLOW_WRITES` | `false` | Enable write operations (firewall rules, service control) |
+| `OPNSENSE_ALLOW_SENSITIVE` | `false` | Permit `include_sensitive=true` on the config tools; without it, passwords and keys are always redacted |
 
 **Custom ports:** If your OPNsense web GUI runs on a non-standard port (e.g., 10443), include it in the URL: `https://192.168.1.1:10443/api`
 
@@ -390,7 +391,7 @@ The server automatically detects the OPNsense version on first connection and se
 
 #### `opn_download_config` shows `[REDACTED]` values
 
-- This is the default behavior for security. Pass `include_sensitive=true` to include passwords and keys (use with caution in AI conversations)
+- This is the default behavior for security. To include passwords and keys, set `OPNSENSE_ALLOW_SENSITIVE=true` in the server environment and pass `include_sensitive=true` (use with caution in AI conversations)
 
 #### Write operations fail with "writes not enabled"
 
