@@ -9,6 +9,9 @@ import pytest
 
 from opnsense_mcp.api_client import OPNsenseAPIError, WriteDisabledError
 from opnsense_mcp.tools.firewall import (
+    _normalize_alias_for_write,
+    _selected_content,
+    _selected_option,
     opn_add_alias,
     opn_add_firewall_category,
     opn_add_firewall_rule,
@@ -514,7 +517,7 @@ class TestOpnAddAlias:
             name="my_hosts",
             content="192.168.1.1\n192.168.1.2",
         )
-        call_args = mock_api_writes.post.call_args
+        call_args = mock_api_writes.post.call_args_list[0]
         assert call_args[0][0] == "firewall.alias.add"
         alias = call_args[0][1]["alias"]
         assert alias["name"] == "my_hosts"
@@ -550,7 +553,7 @@ class TestOpnAddAlias:
             alias_type="geoip",
             content="DE\nFR\nNL",
         )
-        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        alias = mock_api_writes.post.call_args_list[0][0][1]["alias"]
         assert alias["type"] == "geoip"
         assert alias["content"] == "DE\nFR\nNL"
 
@@ -881,17 +884,128 @@ class TestOpnAddIcmpv6Rules:
             await opn_add_icmpv6_rules(mock_ctx_no_writes, interface="lan")
 
 
+class TestAliasWriteNormalization:
+    """get_item read shapes must be reduced to what set_item/add_item accept."""
+
+    def test_selected_option_reduces_enum_dict(self):
+        field = {"host": {"value": "Host(s)", "selected": 0}, "mac": {"value": "MAC address", "selected": 1}}
+        assert _selected_option(field) == "mac"
+        assert _selected_option("plain") == "plain"
+        assert _selected_option(None, "d") == "d"
+
+    def test_selected_content_keeps_only_selected_entries(self):
+        field = {
+            "a.example": {"value": "a.example", "selected": 1},
+            "b.example": {"value": "b.example", "selected": 0},
+        }
+        assert _selected_content(field) == "a.example"
+        assert _selected_content("1.2.3.4\n5.6.7.8") == "1.2.3.4\n5.6.7.8"
+
+    def test_normalize_strips_volatile_and_reduces_enums(self):
+        current = {
+            "enabled": "1",
+            "name": "grp",
+            "type": {"host": {"selected": 1}},
+            "proto": {"IPv4": {"selected": 1}},
+            "interface": {"": {"selected": 1}},
+            "content": {"10.0.0.1": {"value": "10.0.0.1", "selected": 1}},
+            "counters": "1",
+            "eval_match": "3",
+            "out_pass_b": "99",
+            "description": "d",
+        }
+        normalized = _normalize_alias_for_write(current)
+        assert normalized["type"] == "host"
+        assert normalized["proto"] == "IPv4"
+        assert normalized["content"] == "10.0.0.1"
+        for volatile in ("counters", "eval_match", "out_pass_b"):
+            assert volatile not in normalized
+
+    async def test_update_alias_posts_normalized_payload(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.get = AsyncMock(
+            return_value={
+                "alias": {
+                    "enabled": "1",
+                    "name": "mac_grp",
+                    "type": {"mac": {"value": "MAC address", "selected": 1}},
+                    "proto": {"IPv4": {"selected": 1}},
+                    "interface": {"": {"selected": 1}},
+                    "content": {"00:1b:44:11:3a:b7": {"value": "00:1b:44:11:3a:b7", "selected": 1}},
+                    "eval_nomatch": "548",
+                    "description": "macs",
+                },
+            }
+        )
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
+        await opn_update_alias(mock_ctx_writes, uuid="u1", content="00:1b:44:11:3a:b7\n78:21:84:79:e9:18")
+        alias = mock_api_writes.post.call_args_list[0][0][1]["alias"]
+        assert alias["type"] == "mac"
+        assert alias["content"] == "00:1b:44:11:3a:b7\n78:21:84:79:e9:18"
+        assert "eval_nomatch" not in alias
+
+    async def test_add_alias_accepts_mac_type(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(return_value={"result": "saved", "uuid": "mac-uuid"})
+        result = await opn_add_alias(
+            mock_ctx_writes,
+            name="wroom_boards",
+            alias_type="mac",
+            content="78:21:84:79:e9:18",
+        )
+        alias = mock_api_writes.post.call_args_list[0][0][1]["alias"]
+        assert alias["type"] == "mac"
+        assert alias["proto"] == "IPv4"
+        assert result["uuid"] == "mac-uuid"
+
+    async def test_add_alias_rejects_empty_proto(self, mock_ctx_writes):
+        result = await opn_add_alias(mock_ctx_writes, name="x", proto="")
+        assert "error" in result
+        assert "proto" in result["error"]
+
+    async def test_writes_reconfigure_aliases(self, mock_api_writes, mock_ctx_writes):
+        mock_api_writes.post = AsyncMock(
+            side_effect=[
+                {"result": "saved", "uuid": "u2"},
+                {"status": "ok"},
+            ]
+        )
+        result = await opn_add_alias(mock_ctx_writes, name="grp2", content="1.1.1.1")
+        endpoints = [c[0][0] for c in mock_api_writes.post.call_args_list]
+        assert endpoints == ["firewall.alias.add", "firewall.alias.reconfigure"]
+        assert result["reconfigure_status"] == "ok"
+
+
 class TestOpnUpdateAlias:
     """Tests for opn_update_alias."""
 
+    # Realistic get_item shape: enum fields as option dicts, content as a dict
+    # of every selectable entry (only selected ones belong to the alias),
+    # plus volatile statistics that set_item must not receive.
     _CURRENT_ALIAS = {
         "alias": {
-            "name": "my_hosts",
-            "type": "host",
-            "content": "192.168.1.1\n192.168.1.2",
-            "description": "My hosts",
             "enabled": "1",
-            "proto": "",
+            "name": "my_hosts",
+            "type": {
+                "host": {"value": "Host(s)", "selected": 1},
+                "network": {"value": "Network(s)", "selected": 0},
+                "mac": {"value": "MAC address", "selected": 0},
+            },
+            "proto": {
+                "IPv4": {"value": "IPv4", "selected": 1},
+                "IPv6": {"value": "IPv6", "selected": 0},
+            },
+            "interface": {
+                "": {"value": "None", "selected": 1},
+                "lan": {"value": "LAN", "selected": 0},
+            },
+            "content": {
+                "192.168.1.1": {"value": "192.168.1.1", "selected": 1},
+                "192.168.1.2": {"value": "192.168.1.2", "selected": 1},
+                "other_alias": {"value": "other_alias", "selected": 0},
+            },
+            "counters": "0",
+            "eval_match": "12",
+            "in_pass_p": "5",
+            "description": "My hosts",
         },
     }
 
@@ -899,7 +1013,7 @@ class TestOpnUpdateAlias:
         mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
         mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
         result = await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", name="renamed_hosts")
-        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        alias = mock_api_writes.post.call_args_list[0][0][1]["alias"]
         assert alias["name"] == "renamed_hosts"
         assert alias["type"] == "host"
         assert alias["content"] == "192.168.1.1\n192.168.1.2"
@@ -910,7 +1024,7 @@ class TestOpnUpdateAlias:
         mock_api_writes.get = AsyncMock(side_effect=lambda *a, **kw: copy.deepcopy(self._CURRENT_ALIAS))
         mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
         await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", content="10.0.0.1\n10.0.0.2")
-        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        alias = mock_api_writes.post.call_args_list[0][0][1]["alias"]
         assert alias["content"] == "10.0.0.1\n10.0.0.2"
         assert alias["name"] == "my_hosts"
 
@@ -926,7 +1040,7 @@ class TestOpnUpdateAlias:
             description="Updated",
             enabled=False,
         )
-        alias = mock_api_writes.post.call_args[0][1]["alias"]
+        alias = mock_api_writes.post.call_args_list[0][0][1]["alias"]
         assert alias["name"] == "new_name"
         assert alias["content"] == "10.0.0.0/24"
         assert alias["type"] == "network"
@@ -960,9 +1074,10 @@ class TestOpnUpdateAlias:
         mock_api_writes.post = AsyncMock(return_value={"result": "saved"})
         await opn_update_alias(mock_ctx_writes, uuid="alias-uuid-1", name="new")
         mock_api_writes.get.assert_called_once_with("firewall.alias.get", path_suffix="alias-uuid-1")
-        mock_api_writes.post.assert_called_once()
-        assert mock_api_writes.post.call_args[0][0] == "firewall.alias.set"
-        assert mock_api_writes.post.call_args[1]["path_suffix"] == "alias-uuid-1"
+        assert mock_api_writes.post.call_count == 2  # set + reconfigure
+        assert mock_api_writes.post.call_args_list[0][0][0] == "firewall.alias.set"
+        assert mock_api_writes.post.call_args_list[0][1]["path_suffix"] == "alias-uuid-1"
+        assert mock_api_writes.post.call_args_list[1][0][0] == "firewall.alias.reconfigure"
 
 
 class TestOpnDeleteAlias:
@@ -971,7 +1086,9 @@ class TestOpnDeleteAlias:
     async def test_deletes_by_uuid(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.post = AsyncMock(return_value={"result": "deleted"})
         result = await opn_delete_alias(mock_ctx_writes, uuid="alias-to-delete")
-        mock_api_writes.post.assert_called_once_with("firewall.alias.del", path_suffix="alias-to-delete")
+        assert mock_api_writes.post.call_args_list[0][0] == ("firewall.alias.del",)
+        assert mock_api_writes.post.call_args_list[0][1] == {"path_suffix": "alias-to-delete"}
+        assert mock_api_writes.post.call_args_list[1][0] == ("firewall.alias.reconfigure",)
         assert result["result"] == "deleted"
         assert result["uuid"] == "alias-to-delete"
 
@@ -999,7 +1116,9 @@ class TestOpnToggleAlias:
     async def test_toggles_by_uuid(self, mock_api_writes, mock_ctx_writes):
         mock_api_writes.post = AsyncMock(return_value={"result": "toggled"})
         result = await opn_toggle_alias(mock_ctx_writes, uuid="alias-toggle-1")
-        mock_api_writes.post.assert_called_once_with("firewall.alias.toggle", path_suffix="alias-toggle-1")
+        assert mock_api_writes.post.call_args_list[0][0] == ("firewall.alias.toggle",)
+        assert mock_api_writes.post.call_args_list[0][1] == {"path_suffix": "alias-toggle-1"}
+        assert mock_api_writes.post.call_args_list[1][0] == ("firewall.alias.reconfigure",)
         assert result["result"] == "toggled"
         assert result["uuid"] == "alias-toggle-1"
 

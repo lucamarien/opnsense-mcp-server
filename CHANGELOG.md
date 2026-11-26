@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Alias writes failed with HTTP 500 on every call:** `opn_update_alias` posted the raw
+  `get_item` response back to `set_item`, but that response carries enum fields as
+  `{value, selected}` option dicts, `content` as a dict of every selectable entry, and
+  volatile statistics (`counters`, `eval_*`, `in/out_*`). OPNsense rejects that shape with
+  an opaque "Unexpected error, check log for details". Updates now normalize the read
+  payload to writable fields with plain selected values and newline-separated content
+  before posting.
+- **`opn_add_alias` sent `proto: ""`**, which the alias model rejects; it now defaults to
+  `IPv4` (validated, `IPv6` accepted).
+- **`mac` and other valid alias types were refused:** the validation list only allowed
+  host/network/port/urltable/geoip although the firewall itself supports all model types.
+  The list now matches `Alias.xml` (adds `mac`, `networkgroup`, `url`, `urljson`, `asn`,
+  `dynipv6host`, `authgroup`, `internal`, `external`).
+- **Alias changes were saved but not applied:** add/set/del/toggle only persist the
+  configuration; the pf tables keep the old content until something else reloads them.
+  All four now call `firewall.alias.reconfigure` afterwards and report
+  `reconfigure_status`.
+
 ## [0.4.2] - 2026-11-03
 
 ### Security
