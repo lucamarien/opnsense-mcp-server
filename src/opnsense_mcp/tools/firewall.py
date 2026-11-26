@@ -7,17 +7,105 @@ from typing import Any
 
 from fastmcp import Context
 
-from opnsense_mcp.api_client import OPNsenseAPIError
+from opnsense_mcp.api_client import OPNsenseAPI, OPNsenseAPIError
 from opnsense_mcp.server import get_api, get_config_cache, get_savepoint_manager, mcp
 
 _VALID_ACTIONS = frozenset({"pass", "block", "reject"})
 _VALID_DIRECTIONS = frozenset({"in", "out"})
 _VALID_IP_PROTOCOLS = frozenset({"inet", "inet6", "inet46"})
-_VALID_ALIAS_TYPES = frozenset({"host", "network", "port", "urltable", "geoip"})
+_VALID_ALIAS_TYPES = frozenset(
+    {
+        "host",
+        "network",
+        "port",
+        "url",
+        "urltable",
+        "urljson",
+        "geoip",
+        "networkgroup",
+        "mac",
+        "asn",
+        "dynipv6host",
+        "authgroup",
+        "internal",
+        "external",
+    }
+)
 _VALID_NAT_PROTOCOLS = frozenset({"TCP", "UDP", "TCP/UDP"})
 _ALIAS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _CATEGORY_NAME_RE = re.compile(r"^[^,]{1,255}$")
 _HEX_COLOR_RE = re.compile(r"^[0-9a-fA-F]{6}$")
+
+
+def _selected_option(field: object, default: str = "") -> str:
+    """Reduce an OptionField read shape to the plain value the write API expects.
+
+    get_item returns enum fields as {key: {"value": ..., "selected": 0|1}};
+    set_item/add_item only accept the plain selected key.
+    """
+    if isinstance(field, dict):
+        options: dict[str, Any] = field
+        for key, opt in options.items():
+            if isinstance(opt, dict) and opt.get("selected"):
+                return key
+        return default
+    return field if isinstance(field, str) else default
+
+
+def _selected_content(field: object) -> str:
+    """Reduce an alias content read shape to the newline string the write API expects.
+
+    get_item returns content as {entry: {"value": ..., "selected": 0|1}} listing
+    every selectable entry; only selected ones are actually in the alias.
+    """
+    if isinstance(field, dict):
+        entries: list[str] = []
+        for key, value in field.items():
+            if isinstance(value, dict) and value.get("selected"):
+                entries.append(str(value.get("value", key)))
+        return "\n".join(entries)
+    return field if isinstance(field, str) else ""
+
+
+def _normalize_alias_for_write(current: dict[str, Any]) -> dict[str, Any]:
+    """Convert a get_item alias payload into one set_item will accept.
+
+    Posting the raw get_item response back makes OPNsense fail with a 500
+    ("Unexpected error, check log for details"): enum fields arrive as option
+    dicts, content as a dict of all selectable entries, and volatile fields
+    (counters, eval_*, in/out_* statistics) are not writable.
+    """
+    normalized = {
+        "enabled": current.get("enabled", "1"),
+        "name": current.get("name", ""),
+        "type": _selected_option(current.get("type")),
+        "proto": _selected_option(current.get("proto")),
+        "interface": _selected_option(current.get("interface")),
+        "content": _selected_content(current.get("content")),
+        "description": current.get("description", ""),
+    }
+    if "updatefreq" in current:
+        freq = current["updatefreq"]
+        normalized["updatefreq"] = _selected_option(freq) if isinstance(freq, dict) else freq
+    for key in ("password", "username", "authtype", "expire", "path_expression"):
+        if key in current:
+            normalized[key] = _selected_option(current[key]) if isinstance(current[key], dict) else current[key]
+    return normalized
+
+
+async def _reconfigure_aliases(api: OPNsenseAPI) -> str:
+    """Apply saved alias changes to the running pf tables.
+
+    add/set/del/toggle only persist the configuration; without
+    firewall.alias.reconfigure the pf tables keep the old content until some
+    other change triggers a reload. Failures are reported, not raised: the
+    config change itself already succeeded.
+    """
+    try:
+        result = await api.post("firewall.alias.reconfigure")
+    except OPNsenseAPIError as exc:
+        return f"failed: {exc}"
+    return str(result.get("status", "unknown"))
 
 
 def _applied_message(revision: str, what: str) -> str:
@@ -462,29 +550,38 @@ async def opn_add_alias(
     alias_type: str = "host",
     content: str = "",
     description: str = "",
+    proto: str = "IPv4",
 ) -> dict[str, Any]:
     """Create a new firewall alias (IP list, network group, port group, etc.).
 
     Use this when you need to create a reusable alias for use in firewall rules.
-    Aliases group IPs, networks, or ports under a single name.
+    Aliases group IPs, networks, ports or MAC addresses under a single name.
 
     This does NOT require savepoint protection — aliases are metadata definitions
-    that only affect traffic when referenced by a firewall rule.
+    that only affect traffic when referenced by a firewall rule. The change is
+    applied with firewall.alias.reconfigure after saving.
 
     Parameters:
     - name: alias name (alphanumeric and underscores only, no spaces)
     - alias_type: 'host' (IPs), 'network' (CIDRs), 'port' (ports/ranges),
-      'urltable' (URL-based IP list), 'geoip' (country codes)
+      'url'/'urltable'/'urljson' (URL-based IP lists), 'geoip' (country codes),
+      'networkgroup', 'mac' (MAC addresses), 'asn', 'internal', 'external'
     - content: alias entries separated by newlines. For GeoIP, use country codes
       (one per line, e.g. 'DE\\nFR\\nNL'). For host/network, use IPs/CIDRs.
+      For mac, use MAC addresses (e.g. '00:1b:44:11:3a:b7').
     - description: human-readable description
+    - proto: 'IPv4' or 'IPv6' (default 'IPv4'; empty is rejected by the API)
 
     Returns: dict with 'result' (str) and 'uuid' (str) of the new alias.
     """
     if alias_type not in _VALID_ALIAS_TYPES:
         return {
-            "error": (f"Invalid alias_type '{alias_type}'. Must be one of: host, network, port, urltable, geoip"),
+            "error": (
+                "Invalid alias_type '" + alias_type + "'. Must be one of: " + ", ".join(sorted(_VALID_ALIAS_TYPES))
+            ),
         }
+    if proto not in ("IPv4", "IPv6"):
+        return {"error": f"Invalid proto '{proto}'. Must be 'IPv4' or 'IPv6'."}
     if not _ALIAS_NAME_RE.match(name):
         return {
             "error": (f"Invalid alias name '{name}'. Must contain only letters, numbers, and underscores."),
@@ -501,15 +598,17 @@ async def opn_add_alias(
                 "content": content,
                 "description": description,
                 "enabled": "1",
-                "proto": "",
+                "proto": proto,
             },
         },
     )
+    reconfigure_status = await _reconfigure_aliases(api)
     get_config_cache(ctx).invalidate()
     return {
         "result": result.get("result", ""),
         "uuid": result.get("uuid", ""),
         "name": name,
+        "reconfigure_status": reconfigure_status,
     }
 
 
@@ -539,7 +638,8 @@ async def opn_update_alias(
     - name: new alias name (alphanumeric and underscores only)
     - content: new alias entries separated by newlines
     - description: new description
-    - alias_type: new type ('host', 'network', 'port', 'urltable', 'geoip')
+    - alias_type: new type ('host', 'network', 'port', 'urltable', 'geoip',
+      'networkgroup', 'mac', ...)
     - enabled: enable/disable the alias
 
     Returns: dict with 'result' (str) and 'uuid' (str).
@@ -550,15 +650,19 @@ async def opn_update_alias(
         }
     if alias_type is not None and alias_type not in _VALID_ALIAS_TYPES:
         return {
-            "error": f"Invalid alias_type '{alias_type}'. Must be one of: host, network, port, urltable, geoip",
+            "error": (
+                "Invalid alias_type '" + alias_type + "'. Must be one of: " + ", ".join(sorted(_VALID_ALIAS_TYPES))
+            ),
         }
 
     api = get_api(ctx)
     api.require_writes()
 
-    # Read current alias state
+    # Read current alias state and reduce it to writable fields only:
+    # get_item returns option dicts and volatile statistics that set_item
+    # rejects with a 500.
     raw = await api.get("firewall.alias.get", path_suffix=uuid)
-    current = raw.get("alias", {})
+    current = _normalize_alias_for_write(raw.get("alias", {}))
 
     # Merge only provided fields
     if name is not None:
@@ -573,10 +677,12 @@ async def opn_update_alias(
         current["enabled"] = "1" if enabled else "0"
 
     result = await api.post("firewall.alias.set", {"alias": current}, path_suffix=uuid)
+    reconfigure_status = await _reconfigure_aliases(api)
     get_config_cache(ctx).invalidate()
     return {
         "result": result.get("result", ""),
         "uuid": uuid,
+        "reconfigure_status": reconfigure_status,
     }
 
 
@@ -600,10 +706,12 @@ async def opn_delete_alias(
     api = get_api(ctx)
     api.require_writes()
     result = await api.post("firewall.alias.del", path_suffix=uuid)
+    reconfigure_status = await _reconfigure_aliases(api)
     get_config_cache(ctx).invalidate()
     return {
         "result": result.get("result", ""),
         "uuid": uuid,
+        "reconfigure_status": reconfigure_status,
     }
 
 
@@ -624,10 +732,12 @@ async def opn_toggle_alias(
     api = get_api(ctx)
     api.require_writes()
     result = await api.post("firewall.alias.toggle", path_suffix=uuid)
+    reconfigure_status = await _reconfigure_aliases(api)
     get_config_cache(ctx).invalidate()
     return {
         "result": result.get("result", ""),
         "uuid": uuid,
+        "reconfigure_status": reconfigure_status,
     }
 
 
